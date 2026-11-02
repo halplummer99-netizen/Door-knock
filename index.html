@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta name="description" content="Plan a door-knocking route, log every door, export a CSV.">
+  <title>Door Knock</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="tb-title" id="tb-home" type="button">Door Knock</button>
+    <span class="tb-status" id="tb-status"></span>
+    <button class="tb-btn" id="tb-runs" type="button">Runs</button>
+    <button class="tb-btn" id="tb-settings" type="button" aria-label="Settings">Settings</button>
+  </header>
+  <main id="app"><p>Loading…</p></main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>Door Knock needs JavaScript turned on.</noscript>
+  <script src="app.js"></script>
+</body>
+</html>
