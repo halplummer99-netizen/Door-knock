@@ -311,7 +311,7 @@ async function geocode(query, expectedPc) {
     } catch (e) {
       const code = e.code || String(e.message || e);
       if (/ZERO_RESULTS/.test(code)) return { geo: 'fail', note: 'Google couldn’t find this address' };
-      if (/REQUEST_DENIED/.test(code)) throw new Error('Google refused the request. Is the Geocoding API enabled for your key?');
+      if (/REQUEST_DENIED/.test(code)) throw new Error('Google refused the request. Google says: ' + (e.message || code));
       if (/OVER_QUERY_LIMIT/.test(code) && attempt === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
       return { geo: 'fail', note: 'Lookup failed (' + code + ')' };
     }
@@ -353,6 +353,24 @@ async function optimiseRoute(run) {
   if (located.length < 2) { run.route = null; return; }
   if (located.length > MAX_STOPS) { run.optNote = `Google can only optimise ${MAX_STOPS} stops at once.`; return; }
   if (!navigator.onLine) throw new Error('No signal. Optimising needs internet.');
+  const json = await computeRoutes({
+    origin: waypoint(run.start),
+    destination: waypoint(run.end),
+    intermediates: located.map(waypoint),
+    travelMode: 'DRIVE',
+    optimizeWaypointOrder: true,
+    regionCode: 'GB',
+    units: 'IMPERIAL'
+  });
+  const route = json.routes && json.routes[0];
+  if (!route) throw new Error('Routes API returned no route.');
+  const order = route.optimizedIntermediateWaypointIndex;
+  const ordered = Array.isArray(order) && order.length === located.length && order[0] !== -1 ? order.map((i) => located[i]) : located;
+  run.stops = [...ordered, ...missing];
+  run.route = { distanceMeters: route.distanceMeters || 0, duration: route.duration || '' };
+}
+
+async function computeRoutes(body) {
   const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
     method: 'POST',
     referrerPolicy: 'no-referrer-when-downgrade',
@@ -361,27 +379,14 @@ async function optimiseRoute(run) {
       'X-Goog-Api-Key': S.settings.apiKey,
       'X-Goog-FieldMask': 'routes.optimizedIntermediateWaypointIndex,routes.distanceMeters,routes.duration'
     },
-    body: JSON.stringify({
-      origin: waypoint(run.start),
-      destination: waypoint(run.end),
-      intermediates: located.map(waypoint),
-      travelMode: 'DRIVE',
-      optimizeWaypointOrder: true,
-      regionCode: 'GB',
-      units: 'IMPERIAL'
-    })
+    body: JSON.stringify(body)
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (json.error && json.error.message) || `HTTP ${res.status}`;
     throw new Error('Routes API: ' + msg);
   }
-  const route = json.routes && json.routes[0];
-  if (!route) throw new Error('Routes API returned no route.');
-  const order = route.optimizedIntermediateWaypointIndex;
-  const ordered = Array.isArray(order) && order.length === located.length && order[0] !== -1 ? order.map((i) => located[i]) : located;
-  run.stops = [...ordered, ...missing];
-  run.route = { distanceMeters: route.distanceMeters || 0, duration: route.duration || '' };
+  return json;
 }
 
 function routeSummary(run) {
@@ -1078,17 +1083,31 @@ async function renderSettings() {
     S.settings = read();
     await DB.put('kv', S.settings, 'settings');
     say('info', 'Testing…');
+    // Check each Google service separately, quoting Google's own error text.
+    const lines = [];
+    let ok = true;
     try {
       await DB.del('kv', 'g:' + (S.settings.start + ', UK').toLowerCase().replace(/\s+/g, ' '));
       const g = await geocode(S.settings.start + ', UK', '');
-      if (g.geo === 'fail') throw new Error('Geocoding found nothing for ' + S.settings.start);
-      const test = { start: { label: 'a', lat: g.lat, lng: g.lng }, end: { label: 'b', lat: g.lat, lng: g.lng }, stops: [
-        { lat: g.lat + 0.01, lng: g.lng }, { lat: g.lat, lng: g.lng + 0.01 }] };
-      await optimiseRoute(test);
-      say('info', '✓ Key works: Maps JavaScript, Geocoding and Routes all answered.');
+      if (g.geo === 'fail') throw new Error(g.note);
+      lines.push('✓ Address lookup (Maps JavaScript + Geocoding) works');
     } catch (e) {
-      say('bad', '✗ ' + e.message);
+      ok = false;
+      lines.push('✗ Address lookup: ' + e.message);
     }
+    if (S.mapsAuthFailed) {
+      ok = false;
+      lines.push('✗ Google rejected the key when loading Maps JavaScript API (wrong key, website restriction, or billing).');
+    }
+    try {
+      await computeRoutes({ origin: { address: S.settings.start + ', UK' }, destination: { address: S.settings.end + ', UK' }, travelMode: 'DRIVE' });
+      lines.push('✓ Route planning (Routes API) works');
+    } catch (e) {
+      ok = false;
+      lines.push('✗ ' + e.message);
+    }
+    say(ok ? 'info' : 'bad', lines.join('\n'));
+    out.style.whiteSpace = 'pre-line';
   };
 }
 

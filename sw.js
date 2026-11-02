@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v1';
+const VERSION = 'dk-v2';
 const SHELL = [
   './',
   './index.html',
@@ -13,7 +13,12 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache so a new version gets fresh files.
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -39,7 +44,7 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     caches.open(VERSION).then(async (cache) => {
       const cached = await cache.match(key, { ignoreSearch: true });
-      const fresh = fetch(e.request)
+      const fresh = fetch(e.request.url, { cache: 'no-cache' })
         .then((res) => {
           if (res.ok) cache.put(key, res.clone());
           return res;
