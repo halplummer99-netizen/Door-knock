@@ -169,6 +169,9 @@ input:focus, textarea:focus, select:focus, button:focus-visible, a:focus-visible
   border: 3px solid var(--hot); border-radius: 12px; background: var(--bg); color: var(--hot); cursor: pointer;
 }
 .hot-toggle.on { background: var(--hot); color: #fff; }
+.hot-toggle.xmas-toggle { margin-top: 10px; border-color: var(--ans); color: var(--ans); }
+.hot-toggle.xmas-toggle.on { background: var(--ans); color: #fff; }
+.lead.xmas-item { border-left-color: var(--ans); }
 .counter { display: flex; align-items: center; gap: 12px; }
 .counter button { width: 64px; height: 64px; font: inherit; font-size: 2rem; font-weight: 800; border: 2px solid var(--fg); border-radius: 12px; background: var(--bg); color: var(--fg); cursor: pointer; }
 .counter output { min-width: 56px; text-align: center; font-size: 2rem; font-weight: 800; }
@@ -217,3 +220,7 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .toast span { flex: 1; }
 .toast button { font: inherit; font-weight: 800; color: var(--sel); background: none; border: 0; padding: 8px; cursor: pointer; }
 [hidden] { display: none !important; }
+
+/* Listing facts from today's list: agent, listed, price, then status */
+.facts { display: block; white-space: pre-line; margin: 6px 0 2px; font-weight: 600; line-height: 1.35; }
+.card .facts { margin: 8px 0 12px; }
