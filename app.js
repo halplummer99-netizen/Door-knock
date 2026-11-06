@@ -5,11 +5,11 @@
    Everything is stored on the phone in IndexedDB.
    ============================================================ */
 
-// The dashboard relies on these exact columns in this exact order.
+// The dashboard relies on these exact columns in this exact order. New columns go on the end.
 const CSV_COLUMNS = [
   'run_id', 'run_date', 'stop_order', 'address', 'postcode', 'lat', 'lng', 'outcome',
   'contact_name', 'contact_phone', 'situation', 'timescale', 'notes', 'hot_lead', 'follow_up_date',
-  'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at'
+  'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at', 'christmas_card'
 ];
 
 const OUTCOMES = [
@@ -139,13 +139,16 @@ function setStatus(text) { $('#tb-status').textContent = text || ''; }
 function emptyLog() {
   return {
     outcome: '', contact_name: '', contact_phone: '', situation: '', timescale: '', notes: '',
-    hot_lead: false, follow_up_date: '', nb_count: 0, nb_numbers: '', logged_at: ''
+    hot_lead: false, follow_up_date: '', nb_count: 0, nb_numbers: '', logged_at: '',
+    christmas_card: false, christmas_card_at: ''
   };
 }
 function makeStop(line) {
   const p = parseAddressLine(line);
-  return { uid: uid(), raw: p.raw, address: p.address, postcode: p.postcode, lat: null, lng: null, geo: 'pending', note: '', formatted: '', log: emptyLog() };
+  return { uid: uid(), raw: p.raw, address: p.address, postcode: p.postcode, lat: null, lng: null, geo: 'pending', note: '', formatted: '', facts: (S.doorFacts || {})[factKey(line)] || '', log: emptyLog() };
 }
+// The listing facts arrive with today's list and wait here until the addresses become stops.
+function factKey(line) { return String(line).trim().replace(/[,\s]+$/, '').toLowerCase(); }
 function newRun(lines, start, end) {
   const d = new Date();
   return {
@@ -191,6 +194,9 @@ function csvToLines(text) {
   let pi = hdr.findIndex((h) => ['postcode', 'post_code', 'postal_code'].includes(h));
   const isHeader = ai >= 0 || fi >= 0 || pi >= 0;
   const data = isHeader ? rows.slice(1) : rows;
+  // Today's list from Hal's PC (daily-doors.js) says when it was built; addLinesToDraft shows it.
+  const bi = hdr.indexOf('built_on'), ii = hdr.indexOf('list_info'), ci = hdr.indexOf('facts');
+  if (isHeader && bi >= 0 && data.length) csvToLines.info = { built: (data[0][bi] || '').trim(), text: ii >= 0 ? (data[0][ii] || '').trim() : '' };
   if (!isHeader) { ai = 0; pi = rows[0].length > 1 ? 1 : -1; }
   const out = [];
   for (const r of data) {
@@ -204,7 +210,9 @@ function csvToLines(text) {
     }
     const pc = pi >= 0 ? (r[pi] || '').trim() : '';
     if (!a && !pc) continue;
-    out.push(pc && !hasPostcode(a) ? `${a}, ${pc}` : a);
+    const line = pc && !hasPostcode(a) ? `${a}, ${pc}` : a;
+    out.push(line);
+    if (ci >= 0 && (r[ci] || '').trim()) (csvToLines.facts = csvToLines.facts || {})[factKey(line)] = r[ci].trim();
   }
   return out;
 }
@@ -244,16 +252,15 @@ function runRows(run) {
       run.id, run.run_date, i + 1, s.address, s.postcode,
       s.lat == null ? '' : s.lat.toFixed(6), s.lng == null ? '' : s.lng.toFixed(6),
       L.outcome || 'not_logged', L.contact_name, L.contact_phone, L.situation, L.timescale, L.notes,
-      L.hot_lead ? 'TRUE' : 'FALSE', L.follow_up_date, L.nb_count || 0, L.nb_numbers, L.logged_at
+      L.hot_lead ? 'TRUE' : 'FALSE', L.follow_up_date, L.nb_count || 0, L.nb_numbers, L.logged_at,
+      L.christmas_card ? 'TRUE' : 'FALSE'
     ];
   });
 }
-function buildCsv(runs) {
-  const rows = [CSV_COLUMNS, ...runs.flatMap(runRows)];
-  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
-}
-async function exportCsv(runs, filename, mode) {
-  const csv = buildCsv(runs);
+const toCsv = (rows) => rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+function buildCsv(runs) { return toCsv([CSV_COLUMNS, ...runs.flatMap(runRows)]); }
+function exportCsv(runs, filename, mode) { return shareCsv(buildCsv(runs), filename, mode); }
+async function shareCsv(csv, filename, mode) {
   const file = new File([csv], filename, { type: 'text/csv' });
   if (mode === 'share' && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
@@ -323,14 +330,16 @@ async function geocode(query, expectedPc) {
   let geo = 'ok', note = '';
   if (expectedPc && gotPc && gotPc !== normPc(expectedPc)) { geo = 'check'; note = `Google matched ${gotPc}, not ${normPc(expectedPc)}`; }
   else if (!r.types.some((t) => ADDRESS_TYPES.includes(t))) { geo = 'check'; note = 'Only matched to the street/postcode, pin may be off'; }
-  else if (r.partial_match) { geo = 'check'; note = 'Partial match, check the address'; }
+  // Google calls "St." vs "St" or a short town name a partial match; the right postcode on a house is good enough.
+  else if (r.partial_match && !(expectedPc && gotPc)) { geo = 'check'; note = 'Partial match, check the address'; }
   const out = { geo, note, lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), formatted: r.formatted_address };
   DB.put('kv', out, cacheKey).catch(() => {});
   return out;
 }
 
 async function geocodeStop(stop) {
-  const res = await geocode(stop.raw + ', UK', stop.postcode);
+  const query = stop.raw.replace(/\bSLH\b/i, 'Stanford-le-Hope').replace(/\bE Tilbury\b/i, 'East Tilbury');
+  const res = await geocode(query + ', UK', stop.postcode);
   Object.assign(stop, { lat: null, lng: null, formatted: '', ...res });
 }
 async function geocodeEnd(point) {
@@ -447,7 +456,7 @@ $('#tb-settings').onclick = () => go('settings');
 
 function render() {
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, settings: renderSettings }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;
@@ -512,7 +521,20 @@ async function addLinesToDraft(lines, message) {
   const existing = (draft.text || '').trim();
   draft.text = (existing ? existing + '\n' : '') + lines.join('\n');
   await DB.put('kv', draft, 'draft');
+  if (csvToLines.facts) {
+    S.doorFacts = { ...(S.doorFacts || {}), ...csvToLines.facts };
+    csvToLines.facts = null;
+    await DB.put('kv', S.doorFacts, 'doorFacts');
+  }
   if (S.view === 'setup') renderSetup(); else go('setup');
+  const info = csvToLines.info;
+  csvToLines.info = null;
+  if (info && lines.length) {
+    const old = info.built && info.built !== localDate();
+    const warn = old || /WARNING/.test(info.text);
+    const head = old ? `OLD LIST: built ${info.built}, not today. Upload your last run's CSV, then share today's list again.` : message;
+    return toast(`${head} ${info.text}`, null, warn ? 15000 : 8000);
+  }
   toast(lines.length ? message : 'Nothing that looked like an address was found');
 }
 
@@ -576,6 +598,7 @@ function renderReview() {
           <div class="stop-body">
             <b>${esc(s.address)}</b>
             <small>${esc(s.postcode || 'no postcode')}${s.formatted && s.geo !== 'ok' ? ' · Google: ' + esc(s.formatted) : ''}</small>
+            ${s.facts ? `<small class="facts">${esc(s.facts)}</small>` : ''}
             ${s.geo === 'fail' ? `<span class="flag bad">NOT FOUND</span>` : ''}
             ${s.geo === 'check' ? `<span class="flag warn">${esc(s.note)}</span>` : ''}
             <div class="edit-row" ${s.geo === 'fail' ? '' : 'hidden'}>
@@ -729,6 +752,7 @@ function renderDoor() {
     <div class="card" id="card">
       <h2 class="addr">${esc(s.address)}</h2>
       <div class="pc">${esc(s.postcode)}</div>
+      ${s.facts ? `<div class="facts">${esc(s.facts)}</div>` : ''}
       ${s.geo === 'fail' ? `<div class="notice bad">No map pin for this one. Navigate will search the address.</div>` : ''}
       ${s.geo === 'check' ? `<div class="notice warn">${esc(s.note)}</div>` : ''}
       <a class="btn" href="${esc(navUrl(s))}" target="_blank" rel="noopener">Navigate here</a>
@@ -756,6 +780,7 @@ function renderDoor() {
       <textarea id="f-notes" data-f="notes" placeholder="${L.outcome === 'other' ? 'e.g. builders in, owner abroad, do not call…' : ''}">${esc(L.notes)}</textarea>
 
       <button type="button" class="hot-toggle${L.hot_lead ? ' on' : ''}" id="hot" aria-pressed="${L.hot_lead}">${L.hot_lead ? '🔥 HOT LEAD' : 'Mark as hot lead'}</button>
+      <button type="button" class="hot-toggle xmas-toggle${L.christmas_card ? ' on' : ''}" id="xmas" aria-pressed="${!!L.christmas_card}">${xmasLabel(L.christmas_card)}</button>
       <label for="f-fu">Follow-up date (optional)</label>
       <input type="date" id="f-fu" data-f="follow_up_date" value="${esc(L.follow_up_date)}">
 
@@ -811,6 +836,14 @@ function renderDoor() {
     $('#hot').classList.toggle('on', L.hot_lead);
     $('#hot').setAttribute('aria-pressed', L.hot_lead);
     $('#hot').textContent = L.hot_lead ? '🔥 HOT LEAD' : 'Mark as hot lead';
+    touch();
+  };
+  $('#xmas').onclick = () => {
+    L.christmas_card = !L.christmas_card;
+    L.christmas_card_at = L.christmas_card ? nowIso() : '';
+    $('#xmas').classList.toggle('on', L.christmas_card);
+    $('#xmas').setAttribute('aria-pressed', L.christmas_card);
+    $('#xmas').textContent = xmasLabel(L.christmas_card);
     touch();
   };
   const setNb = (n) => { L.nb_count = Math.max(0, n); $('#nb-count').textContent = L.nb_count; touch(); };
@@ -917,7 +950,8 @@ function stats(run) {
     other: by('other'),
     neighbours: nb,
     leaflets: leafletedDoors + nb,
-    hot: run.stops.filter((s) => s.log.hot_lead)
+    hot: run.stops.filter((s) => s.log.hot_lead),
+    xmas: run.stops.filter((s) => s.log.christmas_card).length
   };
 }
 
@@ -948,6 +982,7 @@ async function renderSummary() {
     </div>
     ${st.hot.length ? `<h3>Hot leads</h3>${st.hot.map(leadHtml).join('')}` : ''}
     ${followUps.length ? `<h3>Follow-ups</h3>${followUps.map(leadHtml).join('')}` : ''}
+    ${st.xmas ? `<div class="notice info">🎄 ${st.xmas} added to your Christmas card list. <button class="btn" id="to-xmas" type="button">Open Christmas card list</button></div>` : ''}
     <div class="stack">
       <button class="btn pri big" id="share" type="button">Share CSV</button>
       <button class="btn" id="dl" type="button">Download CSV</button>
@@ -959,6 +994,7 @@ async function renderSummary() {
   const name = `doorknock_${run.id}.csv`;
   $('#share').onclick = () => exportCsv([run], name, 'share');
   $('#dl').onclick = () => exportCsv([run], name, 'download');
+  if ($('#to-xmas')) $('#to-xmas').onclick = () => go('xmas');
   const openRun = async () => {
     run.status = 'active';
     S.run = run;
@@ -997,9 +1033,11 @@ async function renderHistory() {
       return `<button class="runcard" data-id="${esc(r.id)}" type="button"><b>${esc(prettyDate(r.run_date))}</b>${badge}
         <small>${st.total} stops · ${st.answered} answered · ${st.leaflets} leaflets · ${st.hot.length} hot</small></button>`;
     }).join('')}
-    ${runs.length ? `<div class="stack"><button class="btn" id="all" type="button">Share CSV of all runs</button></div>` : ''}
+    ${runs.length ? `<div class="stack"><button class="btn" id="all" type="button">Share CSV of all runs</button>
+      <button class="btn" id="xmas-list" type="button">🎄 Christmas card list (${xmasEntries(runs).length})</button></div>` : ''}
     <div class="stack"><button class="btn pri" id="new" type="button">Plan a new run</button></div>
   `;
+  if ($('#xmas-list')) $('#xmas-list').onclick = () => go('xmas');
   app.querySelectorAll('.runcard').forEach((b) => {
     b.onclick = () => {
       const r = runs.find((x) => x.id === b.dataset.id);
@@ -1010,6 +1048,76 @@ async function renderHistory() {
   });
   if ($('#all')) $('#all').onclick = () => exportCsv(runs.slice().reverse(), `doorknock_all_${localDate()}.csv`, 'share');
   $('#new').onclick = () => go('setup');
+}
+
+/* ---------------- Christmas card list ---------------- */
+const xmasLabel = (on) => (on ? '🎄 On the Christmas card list' : 'Send them a Christmas card');
+
+// Every door marked for a card, across all runs. The same house appears once (latest wins).
+function xmasEntries(runs) {
+  const byHouse = new Map();
+  for (const run of runs.slice().sort((a, b) => a.created - b.created)) {
+    for (const s of run.stops) {
+      if (!s.log.christmas_card) continue;
+      byHouse.set((s.address + '|' + s.postcode).toLowerCase(), {
+        run, stop: s,
+        name: s.log.contact_name.trim(),
+        added: (s.log.christmas_card_at || run.run_date).slice(0, 10)
+      });
+    }
+  }
+  return [...byHouse.values()].sort((a, b) => a.stop.postcode.localeCompare(b.stop.postcode) || a.stop.address.localeCompare(b.stop.address));
+}
+
+async function renderXmas() {
+  const runs = await DB.all('runs');
+  // Use the live copy of the current run so edits made here and on the door cards agree.
+  const live = runs.map((r) => (S.run && S.run.id === r.id ? S.run : r));
+  const list = xmasEntries(live);
+  const who = (e) => e.name || 'The Occupier';
+  app.innerHTML = `
+    <h2>🎄 Christmas card list</h2>
+    <p class="meta">${list.length} card${list.length === 1 ? '' : 's'} to send · sorted by postcode</p>
+    ${list.length ? '' : '<p>Nobody yet. On a door card, tap <b>Send them a Christmas card</b> to add them.</p>'}
+    ${list.map((e, i) => `
+      <div class="lead xmas-item">
+        <div class="row" style="align-items:flex-start">
+          <div style="flex:1"><b>${esc(who(e))}</b><br>${esc(e.stop.address)}<br>${esc(e.stop.postcode)}
+            <br><small class="meta">Added ${esc(prettyDate(e.added))}</small></div>
+          <button class="icon-btn" type="button" data-i="${i}" aria-label="Remove from list" style="flex:none">✕</button>
+        </div>
+      </div>`).join('')}
+    ${list.length ? `<div class="stack">
+      <button class="btn pri big" id="xmas-share" type="button">Share list as CSV</button>
+      <button class="btn" id="xmas-copy" type="button">Copy names &amp; addresses</button>
+    </div>` : ''}
+    <div class="stack"><button class="btn small" id="xmas-back" type="button">Back to runs</button></div>
+  `;
+  app.querySelectorAll('.xmas-item .icon-btn').forEach((b) => {
+    b.onclick = async () => {
+      const e = list[+b.dataset.i];
+      e.stop.log.christmas_card = false;
+      e.stop.log.christmas_card_at = '';
+      await saveRun(e.run);
+      renderXmas();
+      toast(`Removed ${who(e)}, ${e.stop.address}`, { label: 'Undo', fn: async () => {
+        e.stop.log.christmas_card = true;
+        e.stop.log.christmas_card_at = e.added;
+        await saveRun(e.run);
+        renderXmas();
+      } });
+    };
+  });
+  if ($('#xmas-share')) $('#xmas-share').onclick = () => shareCsv(
+    toCsv([['name', 'address', 'postcode', 'added_on', 'run_id'],
+      ...list.map((e) => [who(e), e.stop.address, e.stop.postcode, e.added, e.run.id])]),
+    `christmas_cards_${localDate()}.csv`, 'share');
+  if ($('#xmas-copy')) $('#xmas-copy').onclick = async () => {
+    const text = list.map((e) => [who(e), ...e.stop.address.split(/,\s*/), e.stop.postcode].join('\n')).join('\n\n');
+    try { await navigator.clipboard.writeText(text); toast('Copied. Paste into Notes, Word or an email.'); }
+    catch (err) { toast('Couldn’t copy. Use Share list as CSV instead.'); }
+  };
+  $('#xmas-back').onclick = () => go('history');
 }
 
 /* ---------------- Settings ---------------- */
@@ -1135,6 +1243,7 @@ async function takeShare() {
 async function init() {
   try {
     S.settings = { ...DEFAULT_SETTINGS, ...((await DB.get('kv', 'settings')) || {}) };
+    S.doorFacts = (await DB.get('kv', 'doorFacts')) || {};
     const curId = await DB.get('kv', 'currentRunId');
     if (curId) S.run = (await DB.get('runs', curId)) || null;
   } catch (e) {
