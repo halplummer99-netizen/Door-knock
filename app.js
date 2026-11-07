@@ -9,7 +9,9 @@
 const CSV_COLUMNS = [
   'run_id', 'run_date', 'stop_order', 'address', 'postcode', 'lat', 'lng', 'outcome',
   'contact_name', 'contact_phone', 'situation', 'timescale', 'notes', 'hot_lead', 'follow_up_date',
-  'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at', 'christmas_card'
+  'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at', 'christmas_card',
+  'door_at', 'gps_lat', 'gps_lng', 'gps_accuracy_m', 'metres_from_door', 'left_at', 'minutes_at_door',
+  'run_minutes', 'run_steps', 'run_miles'
 ];
 
 const OUTCOMES = [
@@ -140,7 +142,8 @@ function emptyLog() {
   return {
     outcome: '', contact_name: '', contact_phone: '', situation: '', timescale: '', notes: '',
     hot_lead: false, follow_up_date: '', nb_count: 0, nb_numbers: '', logged_at: '',
-    christmas_card: false, christmas_card_at: ''
+    christmas_card: false, christmas_card_at: '',
+    door_at: '', door_lat: null, door_lng: null, door_accuracy: null, left_at: ''
   };
 }
 function makeStop(line) {
@@ -246,14 +249,21 @@ function csvCell(v) {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function runRows(run) {
+  const timing = runTiming(run);
   return run.stops.map((s, i) => {
     const L = s.log;
+    const metres = metresFromDoor(s);
+    const atDoor = minutesAtDoor(L);
     return [
       run.id, run.run_date, i + 1, s.address, s.postcode,
       s.lat == null ? '' : s.lat.toFixed(6), s.lng == null ? '' : s.lng.toFixed(6),
       L.outcome || 'not_logged', L.contact_name, L.contact_phone, L.situation, L.timescale, L.notes,
       L.hot_lead ? 'TRUE' : 'FALSE', L.follow_up_date, L.nb_count || 0, L.nb_numbers, L.logged_at,
-      L.christmas_card ? 'TRUE' : 'FALSE'
+      L.christmas_card ? 'TRUE' : 'FALSE',
+      L.door_at, L.door_lat == null ? '' : L.door_lat.toFixed(6), L.door_lng == null ? '' : L.door_lng.toFixed(6),
+      L.door_accuracy == null ? '' : Math.round(L.door_accuracy), metres == null ? '' : metres,
+      L.left_at, atDoor == null ? '' : atDoor.toFixed(1),
+      timing ? Math.round(timing.minutes) : '', run.steps, run.miles
     ];
   });
 }
@@ -455,6 +465,7 @@ $('#tb-runs').onclick = () => go('history');
 $('#tb-settings').onclick = () => go('settings');
 
 function render() {
+  if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
   ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings }[S.view] || renderSetup)();
 }
@@ -736,6 +747,116 @@ function bindDrag(list) {
   });
 }
 
+/* ---------------- Door stamps: time and GPS at the first outcome tap ---------------- */
+const GPS = { watch: null, fix: null, state: 'idle', pending: [] };
+const FIX_FRESH_MS = 15000;  // a fix this recent counts as "here"
+const FIX_WAIT_MS = 20000;   // otherwise take the next fix that arrives within this long
+const FAR_FROM_DOOR_M = 100; // flagged in the door-by-door list
+
+function startGps() {
+  if (GPS.watch != null) return;
+  if (!navigator.geolocation) { GPS.state = 'unavailable'; return; }
+  GPS.state = GPS.fix ? 'ready' : 'looking';
+  GPS.watch = navigator.geolocation.watchPosition((pos) => {
+    GPS.fix = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, at: pos.timestamp || Date.now() };
+    GPS.state = 'ready';
+    const waiting = GPS.pending.filter((p) => Date.now() < p.until);
+    GPS.pending = [];
+    waiting.forEach((p) => applyFix(p.log));
+    updateGpsLine();
+  }, (err) => {
+    if (err.code === err.PERMISSION_DENIED) GPS.state = 'denied';
+    updateGpsLine();
+  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+}
+function stopGps() {
+  if (GPS.watch != null) navigator.geolocation.clearWatch(GPS.watch);
+  GPS.watch = null;
+  GPS.pending = [];
+}
+// Android can pause the watch while Google Maps is in front, so restart it on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || S.view !== 'door') return;
+  stopGps();
+  startGps();
+  updateGpsLine();
+});
+
+function applyFix(log) {
+  log.door_lat = GPS.fix.lat;
+  log.door_lng = GPS.fix.lng;
+  log.door_accuracy = GPS.fix.accuracy;
+  queueSave();
+}
+// Only the first outcome tap stamps a door: notes, leaflets and swiping never move it.
+function stampDoor(log) {
+  log.door_at = nowIso();
+  if (GPS.fix && Date.now() - GPS.fix.at <= FIX_FRESH_MS) applyFix(log);
+  else if (GPS.watch != null) GPS.pending.push({ log, until: Date.now() + FIX_WAIT_MS });
+}
+function clearDoorStamp(log) {
+  GPS.pending = GPS.pending.filter((p) => p.log !== log);
+  Object.assign(log, { door_at: '', door_lat: null, door_lng: null, door_accuracy: null, left_at: '' });
+}
+function markLeft(stop) {
+  if (stop.log.door_at && !stop.log.left_at) stop.log.left_at = nowIso();
+}
+
+function metresBetween(aLat, aLng, bLat, bLng) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(bLat - aLat) / 2) ** 2 +
+    Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(rad(bLng - aLng) / 2) ** 2;
+  return 6371000 * 2 * Math.asin(Math.sqrt(h));
+}
+function metresFromDoor(stop) {
+  const L = stop.log;
+  if (L.door_lat == null || stop.lat == null) return null;
+  return Math.round(metresBetween(stop.lat, stop.lng, L.door_lat, L.door_lng));
+}
+function minutesAtDoor(log) {
+  if (!log.door_at || !log.left_at) return null;
+  return (Date.parse(log.left_at) - Date.parse(log.door_at)) / 60000;
+}
+const clock = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+// Doorstep time: first outcome tap to leaving the last door, so planning and the drive don't count.
+function runTiming(run) {
+  const doors = run.stops.filter((s) => s.log.door_at)
+    .sort((a, b) => Date.parse(a.log.door_at) - Date.parse(b.log.door_at));
+  if (!doors.length) return null;
+  const first = Date.parse(doors[0].log.door_at);
+  const lastAt = Math.max(...doors.map((s) => Date.parse(s.log.left_at || s.log.door_at)));
+  const minutes = (lastAt - first) / 60000;
+  const stays = doors.map((s) => minutesAtDoor(s.log)).filter((m) => m != null);
+  return {
+    doors, minutes,
+    firstIso: doors[0].log.door_at,
+    lastIso: new Date(lastAt).toISOString(),
+    perDoor: minutes / doors.length,
+    perHour: doors.length > 1 && minutes > 0 ? doors.length / (minutes / 60) : null,
+    avgStay: stays.length ? stays.reduce((a, b) => a + b, 0) / stays.length : null
+  };
+}
+
+function gpsText(stop) {
+  const L = stop.log;
+  if (L.door_at) {
+    const metres = metresFromDoor(stop);
+    const waiting = GPS.pending.some((p) => p.log === L);
+    const where = L.door_lat != null ? (metres != null ? ` · ${metres} m from the address` : ' · GPS saved')
+      : waiting ? ' · finding GPS…' : ' · no GPS fix';
+    return `📍 At the door ${clock(L.door_at)}${where}`;
+  }
+  if (GPS.state === 'ready') return `GPS ready (±${Math.round(GPS.fix.accuracy)} m)`;
+  if (GPS.state === 'looking') return 'GPS looking…';
+  if (GPS.state === 'denied') return 'GPS off: allow location for Door Knock in Android settings. Times still record.';
+  return 'No GPS available. Times still record.';
+}
+function updateGpsLine() {
+  const el = $('#gps');
+  if (el && S.run) el.textContent = gpsText(S.run.stops[S.run.idx]);
+}
+
 /* ---------------- Door card ---------------- */
 function renderDoor() {
   const run = S.run;
@@ -756,6 +877,7 @@ function renderDoor() {
       ${s.geo === 'fail' ? `<div class="notice bad">No map pin for this one. Navigate will search the address.</div>` : ''}
       ${s.geo === 'check' ? `<div class="notice warn">${esc(s.note)}</div>` : ''}
       <a class="btn" href="${esc(navUrl(s))}" target="_blank" rel="noopener">Navigate here</a>
+      <div class="gps" id="gps">${esc(gpsText(s))}</div>
 
       <div class="outcomes" role="group" aria-label="Outcome">
         ${OUTCOMES.map((o, n) => `<button type="button" class="outcome${L.outcome === o.k ? ' on' : ''}" data-o="${o.k}"><span class="n"><i>${n + 1}</i></span><span>${esc(o.label)}</span></button>`).join('')}
@@ -808,6 +930,9 @@ function renderDoor() {
   app.querySelectorAll('.outcome').forEach((b) => {
     b.onclick = () => {
       L.outcome = L.outcome === b.dataset.o ? '' : b.dataset.o;
+      if (!L.outcome) clearDoorStamp(L);
+      else if (!L.door_at) stampDoor(L);
+      updateGpsLine();
       app.querySelectorAll('.outcome').forEach((x) => x.classList.toggle('on', x.dataset.o === L.outcome));
       $('#ans').hidden = L.outcome !== 'answered';
       $('#notes-label').textContent = L.outcome === 'other' ? 'What happened?' : 'Notes';
@@ -860,6 +985,7 @@ function step(dir) {
   const run = S.run;
   const next = run.idx + dir;
   if (next < 0) return;
+  markLeft(run.stops[run.idx]);
   if (next >= run.stops.length) {
     saveRun();
     S.viewRun = run;
@@ -929,9 +1055,12 @@ function openStopsSheet() {
   document.body.appendChild(wrap);
   wrap.addEventListener('click', (e) => {
     if (e.target === wrap || e.target.id === 'sheet-close') return closeSheet();
-    if (e.target.id === 'sheet-end') { closeSheet(); saveRun(); S.viewRun = run; return go('summary'); }
+    if (e.target.id === 'sheet-end') { markLeft(run.stops[run.idx]); closeSheet(); saveRun(); S.viewRun = run; return go('summary'); }
     const j = e.target.closest('.jump');
-    if (j) { run.idx = +j.dataset.i; saveRun(); closeSheet(); renderDoor(); window.scrollTo(0, 0); }
+    if (j) {
+      if (+j.dataset.i !== run.idx) markLeft(run.stops[run.idx]);
+      run.idx = +j.dataset.i; saveRun(); closeSheet(); renderDoor(); window.scrollTo(0, 0);
+    }
   });
 }
 function closeSheet() { const s = $('#sheet'); if (s) s.remove(); }
@@ -959,6 +1088,7 @@ async function renderSummary() {
   const run = S.viewRun || S.run;
   if (!run) return go('history', false);
   const st = stats(run);
+  const timing = runTiming(run);
   const isCurrent = S.run && S.run.id === run.id;
   const followUps = run.stops.filter((s) => s.log.follow_up_date && !s.log.hot_lead);
   const leadHtml = (s) => `
@@ -980,6 +1110,33 @@ async function renderSummary() {
       <div class="stat"><b>${st.ncc}</b><span>No cold callers</span></div>
       <div class="stat"><b>${st.other}</b><span>Other</span></div>
     </div>
+    ${timing ? `<h3>Time on the doors</h3>
+    <p class="meta">${esc(clock(timing.firstIso))} to ${esc(clock(timing.lastIso))}</p>
+    <div class="stats">
+      <div class="stat"><b>${Math.round(timing.minutes)}</b><span>Minutes out</span></div>
+      <div class="stat"><b>${timing.perDoor.toFixed(1)}</b><span>Minutes per door</span></div>
+      <div class="stat"><b>${timing.perHour == null ? '–' : timing.perHour.toFixed(1)}</b><span>Doors per hour</span></div>
+      <div class="stat"><b>${timing.avgStay == null ? '–' : timing.avgStay.toFixed(1)}</b><span>Average minutes at a door</span></div>
+    </div>
+    <details>
+      <summary>Door by door (${timing.doors.length})</summary>
+      ${timing.doors.map((s, i) => {
+        const metres = metresFromDoor(s);
+        const stay = minutesAtDoor(s.log);
+        const prev = timing.doors[i - 1];
+        const gap = prev ? (Date.parse(s.log.door_at) - Date.parse(prev.log.left_at || prev.log.door_at)) / 60000 : null;
+        return `<div class="doorlog">
+          <b>${esc(clock(s.log.door_at))}</b> ${esc(s.address)}
+          <small>${gap == null ? 'First door' : `${Math.max(0, gap).toFixed(1)} min since the last door`}${stay == null ? '' : ` · ${stay.toFixed(1)} min here`}</small>
+          <small class="${metres != null && metres > FAR_FROM_DOOR_M ? 'far' : ''}">${s.log.door_lat == null ? 'No GPS fix' : `${metres == null ? 'GPS saved' : `${metres} m from the address`} · <a href="https://www.google.com/maps/search/?api=1&query=${s.log.door_lat.toFixed(6)}%2C${s.log.door_lng.toFixed(6)}" target="_blank" rel="noopener">See on map</a>`}</small>
+        </div>`;
+      }).join('')}
+    </details>` : ''}
+    <h3 style="margin-top:16px">From your watch (optional)</h3>
+    <div class="row">
+      <div><label for="w-steps" style="margin-top:0">Steps</label><input type="number" inputmode="numeric" min="0" id="w-steps" value="${esc(run.steps)}"></div>
+      <div><label for="w-miles" style="margin-top:0">Miles</label><input type="number" inputmode="decimal" min="0" step="any" id="w-miles" value="${esc(run.miles)}"></div>
+    </div>
     ${st.hot.length ? `<h3>Hot leads</h3>${st.hot.map(leadHtml).join('')}` : ''}
     ${followUps.length ? `<h3>Follow-ups</h3>${followUps.map(leadHtml).join('')}` : ''}
     ${st.xmas ? `<div class="notice info">🎄 ${st.xmas} added to your Christmas card list. <button class="btn" id="to-xmas" type="button">Open Christmas card list</button></div>` : ''}
@@ -995,6 +1152,8 @@ async function renderSummary() {
   $('#share').onclick = () => exportCsv([run], name, 'share');
   $('#dl').onclick = () => exportCsv([run], name, 'download');
   if ($('#to-xmas')) $('#to-xmas').onclick = () => go('xmas');
+  $('#w-steps').oninput = (e) => { run.steps = e.target.value; flushSave(); saveRun(run); };
+  $('#w-miles').oninput = (e) => { run.miles = e.target.value; flushSave(); saveRun(run); };
   const openRun = async () => {
     run.status = 'active';
     S.run = run;

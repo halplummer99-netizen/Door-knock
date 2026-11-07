@@ -141,6 +141,10 @@ input:focus, textarea:focus, select:focus, button:focus-visible, a:focus-visible
 .card.swiping { transition: none; }
 .addr { font-size: 1.6rem; font-weight: 800; margin: 0; word-wrap: break-word; }
 .pc { font-size: 1.2rem; font-weight: 700; color: var(--muted); margin: 2px 0 12px; }
+.gps { margin-top: 10px; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.doorlog { padding: 10px 0; border-top: 1px solid var(--line); }
+.doorlog small { display: block; color: var(--muted); margin-top: 2px; }
+.doorlog small.far { color: var(--ncc); font-weight: 700; }
 .outcomes { display: grid; gap: 10px; margin: 16px 0; }
 .outcome {
   min-height: 64px; padding: 10px 14px; font: inherit; font-size: 1.05rem; font-weight: 800; text-align: left;

@@ -85,7 +85,9 @@ Any of these work (header row optional for the first one):
 
 ### CSV export columns (always this order)
 
-`run_id, run_date, stop_order, address, postcode, lat, lng, outcome, contact_name, contact_phone, situation, timescale, notes, hot_lead, follow_up_date, neighbours_leafleted_count, neighbours_leafleted_numbers, logged_at`
+`run_id, run_date, stop_order, address, postcode, lat, lng, outcome, contact_name, contact_phone, situation, timescale, notes, hot_lead, follow_up_date, neighbours_leafleted_count, neighbours_leafleted_numbers, logged_at, christmas_card, door_at, gps_lat, gps_lng, gps_accuracy_m, metres_from_door, left_at, minutes_at_door, run_minutes, run_steps, run_miles`
+
+Any new column is added on the end, so the existing columns never move.
 
 | column | values |
 |---|---|
@@ -96,6 +98,28 @@ Any of these work (header row optional for the first one):
 | hot_lead | `TRUE` / `FALSE` |
 | follow_up_date, run_date | `YYYY-MM-DD` |
 | logged_at | when that door was last changed, e.g. `2026-11-02T10:15:03+00:00` |
+| christmas_card | `TRUE` / `FALSE`: tapped **Send them a Christmas card** on that door |
+| door_at | the moment of the **first outcome tap** on that door. Notes, leaflets and swiping never change it |
+| gps_lat, gps_lng, gps_accuracy_m | where the phone was at that tap, and how accurate the fix was. Blank if there was no fix |
+| metres_from_door | distance from that GPS point to the address's map pin |
+| left_at | when you first swiped or moved on from that door |
+| minutes_at_door | time from `door_at` to `left_at`, including any neighbour leaflets |
+| run_minutes, run_steps, run_miles | whole-run figures, repeated on every row of the run, so don't add them up across rows. `run_minutes` runs from the first door to leaving the last door. Steps and miles are what you typed in from your watch |
+
+### Tracking a run
+
+Tracking needs no setup beyond allowing location the first time the app asks. Each door is stamped when you first tap its outcome, so tap at the door and swipe when you leave. Tapping the selected outcome again clears the stamp, ready for a fresh tap.
+
+The run summary shows times, minutes per door, doors per hour and a door-by-door list with a map link for each stamp. Anything over 100 m from the address shows in red. Tracking only happens at those taps: the app does not follow you between doors.
+
+For steps and distance, start a **Walk** on your watch at the first door and stop it at the last. Type the totals into **From your watch** on the run summary.
+
+### Christmas card list
+
+On any door card, tap **Send them a Christmas card**. Everyone you've ticked, across every run, appears under
+**Runs → 🎄 Christmas card list**, sorted by postcode. A house only appears once, and anyone without a name is listed as
+"The Occupier". **Share list as CSV** gives `name, address, postcode, added_on, run_id`, ready for a label mail merge.
+**Copy names & addresses** copies them as address blocks. Tap ✕ to take someone off the list.
 
 ### Updating the app later
 
