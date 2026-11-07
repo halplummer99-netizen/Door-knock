@@ -11,7 +11,7 @@ const CSV_COLUMNS = [
   'contact_name', 'contact_phone', 'situation', 'timescale', 'notes', 'hot_lead', 'follow_up_date',
   'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at', 'christmas_card',
   'door_at', 'gps_lat', 'gps_lng', 'gps_accuracy_m', 'metres_from_door', 'left_at', 'minutes_at_door',
-  'run_minutes', 'run_steps', 'run_miles'
+  'run_minutes'
 ];
 
 const OUTCOMES = [
@@ -263,7 +263,7 @@ function runRows(run) {
       L.door_at, L.door_lat == null ? '' : L.door_lat.toFixed(6), L.door_lng == null ? '' : L.door_lng.toFixed(6),
       L.door_accuracy == null ? '' : Math.round(L.door_accuracy), metres == null ? '' : metres,
       L.left_at, atDoor == null ? '' : atDoor.toFixed(1),
-      timing ? Math.round(timing.minutes) : '', run.steps, run.miles
+      timing ? Math.round(timing.minutes) : ''
     ];
   });
 }
@@ -1132,11 +1132,6 @@ async function renderSummary() {
         </div>`;
       }).join('')}
     </details>` : ''}
-    <h3 style="margin-top:16px">From your watch (optional)</h3>
-    <div class="row">
-      <div><label for="w-steps" style="margin-top:0">Steps</label><input type="number" inputmode="numeric" min="0" id="w-steps" value="${esc(run.steps)}"></div>
-      <div><label for="w-miles" style="margin-top:0">Miles</label><input type="number" inputmode="decimal" min="0" step="any" id="w-miles" value="${esc(run.miles)}"></div>
-    </div>
     ${st.hot.length ? `<h3>Hot leads</h3>${st.hot.map(leadHtml).join('')}` : ''}
     ${followUps.length ? `<h3>Follow-ups</h3>${followUps.map(leadHtml).join('')}` : ''}
     ${st.xmas ? `<div class="notice info">🎄 ${st.xmas} added to your Christmas card list. <button class="btn" id="to-xmas" type="button">Open Christmas card list</button></div>` : ''}
@@ -1152,8 +1147,6 @@ async function renderSummary() {
   $('#share').onclick = () => exportCsv([run], name, 'share');
   $('#dl').onclick = () => exportCsv([run], name, 'download');
   if ($('#to-xmas')) $('#to-xmas').onclick = () => go('xmas');
-  $('#w-steps').oninput = (e) => { run.steps = e.target.value; flushSave(); saveRun(run); };
-  $('#w-miles').oninput = (e) => { run.miles = e.target.value; flushSave(); saveRun(run); };
   const openRun = async () => {
     run.status = 'active';
     S.run = run;
