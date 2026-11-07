@@ -1183,7 +1183,7 @@ async function renderHistory() {
       const st = stats(r);
       const badge = r.status === 'done' ? '' : `<span class="badge live">${r.status === 'planning' ? 'Planning' : 'In progress'}</span>`;
       return `<button class="runcard" data-id="${esc(r.id)}" type="button"><b>${esc(prettyDate(r.run_date))}</b>${badge}
-        <small>${st.total} stops · ${st.answered} answered · ${st.leaflets} leaflets · ${st.hot.length} hot</small></button>`;
+        <small>${r.status === 'planning' ? `${st.total} stops planned` : `${st.logged} door${st.logged === 1 ? '' : 's'} knocked`} · ${st.answered} answered · ${st.leaflets} leaflets · ${st.hot.length} hot</small></button>`;
     }).join('')}
     ${runs.length ? `<div class="stack"><button class="btn" id="all" type="button">Share CSV of all runs</button>
       <button class="btn" id="xmas-list" type="button">🎄 Christmas card list (${xmasEntries(runs).length})</button></div>` : ''}

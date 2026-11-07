@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v7';
+const VERSION = 'dk-v8';
 const SHELL = [
   './',
   './index.html',
