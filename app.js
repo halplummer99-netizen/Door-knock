@@ -102,6 +102,50 @@ function prettyDate(iso) {
   const d = new Date(iso.length === 10 ? iso + 'T12:00:00' : iso);
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
+/* ---------------- Last knocked (from past runs on this phone) ---------------- */
+// Match on the first line of the address ("30e branksome close") plus postcode, so the same house
+// matches even when one run says ", Stanford-le-Hope" and another doesn't.
+function houseKey(address) {
+  return String(address || '').split(',')[0].toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+async function loadPastKnocks() {
+  const idx = {};
+  for (const r of await DB.all('runs')) {
+    for (const s of r.stops || []) {
+      const L = s.log || {};
+      if (!L.outcome || L.outcome === 'not_logged') continue;
+      const k = houseKey(s.address);
+      if (!k) continue;
+      (idx[k] = idx[k] || []).push({
+        runId: r.id,
+        pc: normPc(s.postcode).replace(/\s/g, ''),
+        when: L.door_at || L.logged_at || r.run_date,
+        outcome: L.outcome,
+        name: L.contact_name || ''
+      });
+    }
+  }
+  S.pastKnocks = idx;
+}
+function lastKnock(s) {
+  const pc = normPc(s.postcode).replace(/\s/g, '');
+  const hits = ((S.pastKnocks || {})[houseKey(s.address)] || [])
+    .filter((h) => (!S.run || h.runId !== S.run.id) && (!pc || !h.pc || h.pc === pc))
+    .sort((a, b) => String(b.when).localeCompare(String(a.when)));
+  return hits.length ? { ...hits[0], times: hits.length } : null;
+}
+function lastKnockText(s) {
+  const h = lastKnock(s);
+  if (!h) return 'Never knocked before';
+  const d = new Date(String(h.when).length === 10 ? h.when + 'T12:00:00' : h.when);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  const ago = days < 1 ? 'today' : days === 1 ? 'yesterday' : days < 14 ? `${days} days ago` : days < 70 ? `${Math.round(days / 7)} weeks ago` : `${Math.round(days / 30.4)} months ago`;
+  const o = OUTCOMES.find((x) => x.k === h.outcome);
+  const what = (o ? o.short : h.outcome) + (h.outcome === 'answered' && h.name ? ` (${h.name})` : '');
+  const date = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `Last knocked ${date} · ${ago} · ${what}${h.times > 1 ? ` · ${h.times} visits` : ''}`;
+}
+
 function normPc(pc) {
   const m = String(pc || '').toUpperCase().replace(/\s+/g, '').match(/^([A-Z]{1,2}\d[A-Z\d]?)(\d[A-Z]{2})$/);
   return m ? `${m[1]} ${m[2]}` : String(pc || '').toUpperCase().trim();
@@ -874,6 +918,7 @@ function renderDoor() {
       <h2 class="addr">${esc(s.address)}</h2>
       <div class="pc">${esc(s.postcode)}</div>
       ${s.facts ? `<div class="facts">${esc(s.facts)}</div>` : ''}
+      <div class="lastknock${lastKnock(s) ? '' : ' never'}">${esc(lastKnockText(s))}</div>
       ${s.geo === 'fail' ? `<div class="notice bad">No map pin for this one. Navigate will search the address.</div>` : ''}
       ${s.geo === 'check' ? `<div class="notice warn">${esc(s.note)}</div>` : ''}
       <a class="btn" href="${esc(navUrl(s))}" target="_blank" rel="noopener">Navigate here</a>
@@ -1160,6 +1205,7 @@ async function renderSummary() {
     run.status = 'done';
     run.finished = Date.now();
     await saveRun(run);
+    loadPastKnocks().catch(() => {});
     if (isCurrent) { S.run = null; await DB.del('kv', 'currentRunId'); }
     renderSummary();
     toast('Run finished. Remember to share the CSV.');
@@ -1398,6 +1444,7 @@ async function init() {
     S.doorFacts = (await DB.get('kv', 'doorFacts')) || {};
     const curId = await DB.get('kv', 'currentRunId');
     if (curId) S.run = (await DB.get('runs', curId)) || null;
+    await loadPastKnocks();
   } catch (e) {
     app.innerHTML = `<div class="notice bad">This phone's storage isn't available (${esc(e.message)}). Private/incognito tabs can't save runs.</div>`;
     return;
