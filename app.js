@@ -11,7 +11,7 @@ const CSV_COLUMNS = [
   'contact_name', 'contact_phone', 'situation', 'timescale', 'notes', 'hot_lead', 'follow_up_date',
   'neighbours_leafleted_count', 'neighbours_leafleted_numbers', 'logged_at', 'christmas_card',
   'door_at', 'gps_lat', 'gps_lng', 'gps_accuracy_m', 'metres_from_door', 'left_at', 'minutes_at_door',
-  'run_minutes'
+  'run_minutes', 'letter_delivered'
 ];
 
 const OUTCOMES = [
@@ -186,7 +186,7 @@ function emptyLog() {
   return {
     outcome: '', contact_name: '', contact_phone: '', situation: '', timescale: '', notes: '',
     hot_lead: false, follow_up_date: '', nb_count: 0, nb_numbers: '', logged_at: '',
-    christmas_card: false, christmas_card_at: '',
+    christmas_card: false, christmas_card_at: '', letter_delivered: false, letter_at: '',
     door_at: '', door_lat: null, door_lng: null, door_accuracy: null, left_at: ''
   };
 }
@@ -307,7 +307,8 @@ function runRows(run) {
       L.door_at, L.door_lat == null ? '' : L.door_lat.toFixed(6), L.door_lng == null ? '' : L.door_lng.toFixed(6),
       L.door_accuracy == null ? '' : Math.round(L.door_accuracy), metres == null ? '' : metres,
       L.left_at, atDoor == null ? '' : atDoor.toFixed(1),
-      timing ? Math.round(timing.minutes) : ''
+      timing ? Math.round(timing.minutes) : '',
+      L.letter_delivered ? 'TRUE' : 'FALSE'
     ];
   });
 }
@@ -948,6 +949,7 @@ function renderDoor() {
 
       <button type="button" class="hot-toggle${L.hot_lead ? ' on' : ''}" id="hot" aria-pressed="${L.hot_lead}">${L.hot_lead ? '🔥 HOT LEAD' : 'Mark as hot lead'}</button>
       <button type="button" class="hot-toggle xmas-toggle${L.christmas_card ? ' on' : ''}" id="xmas" aria-pressed="${!!L.christmas_card}">${xmasLabel(L.christmas_card)}</button>
+      <button type="button" class="hot-toggle letter-toggle${L.letter_delivered ? ' on' : ''}" id="letter" aria-pressed="${!!L.letter_delivered}">${letterLabel(L)}</button>
       <label for="f-fu">Follow-up date (optional)</label>
       <input type="date" id="f-fu" data-f="follow_up_date" value="${esc(L.follow_up_date)}">
 
@@ -981,6 +983,7 @@ function renderDoor() {
       app.querySelectorAll('.outcome').forEach((x) => x.classList.toggle('on', x.dataset.o === L.outcome));
       $('#ans').hidden = L.outcome !== 'answered';
       $('#notes-label').textContent = L.outcome === 'other' ? 'What happened?' : 'Notes';
+      $('#letter').textContent = letterLabel(L);
       $('#f-notes').placeholder = L.outcome === 'other' ? 'e.g. builders in, owner abroad, do not call…' : '';
       if (L.outcome === 'other') $('#f-notes').focus();
       touch();
@@ -1014,6 +1017,14 @@ function renderDoor() {
     $('#xmas').classList.toggle('on', L.christmas_card);
     $('#xmas').setAttribute('aria-pressed', L.christmas_card);
     $('#xmas').textContent = xmasLabel(L.christmas_card);
+    touch();
+  };
+  $('#letter').onclick = () => {
+    L.letter_delivered = !L.letter_delivered;
+    L.letter_at = L.letter_delivered ? nowIso() : '';
+    $('#letter').classList.toggle('on', L.letter_delivered);
+    $('#letter').setAttribute('aria-pressed', L.letter_delivered);
+    $('#letter').textContent = letterLabel(L);
     touch();
   };
   const setNb = (n) => { L.nb_count = Math.max(0, n); $('#nb-count').textContent = L.nb_count; touch(); };
@@ -1249,7 +1260,9 @@ async function renderHistory() {
 }
 
 /* ---------------- Christmas card list ---------------- */
-const xmasLabel = (on) => (on ? '🎄 On the Christmas card list' : 'Send them a Christmas card');
+// The door-knocking letter: handed over if they answered, otherwise through the letterbox.
+const letterLabel = (L) => (L.letter_delivered ? (L.outcome === 'answered' ? '✉️ Letter handed over' : '✉️ Letter delivered') : 'Letter handed over / delivered');
+const xmasLabel =(on) => (on ? '🎄 On the Christmas card list' : 'Send them a Christmas card');
 
 // Every door marked for a card, across all runs. The same house appears once (latest wins).
 function xmasEntries(runs) {
