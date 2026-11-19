@@ -229,6 +229,7 @@ function evidenceRange(sub, comps) {
 
 // Listings with the same bedrooms within a radius (miles), each matched to its EPC size and coloured
 // green (within 10% of this home), amber (10-25%) or grey (more, or unknown). Closest and most similar first.
+const SPRIFT_TYPE = { terraced: 'terraced', semi: 'semi-detached', detached: 'detached', flat: 'flat' };
 function marketSameBeds(sub, radiusMi) {
   const rows = (VAL.pack.market || []).filter((r) => !r.withdrawn && !r.fell && r.price >= 50000);
   const here = VAL.pack.pts[sub.pc];
@@ -244,6 +245,8 @@ function marketSameBeds(sub, radiusMi) {
   for (const r of rows) {
     if (r === own) continue;
     if (/flat|maisonette|apartment/i.test(r.type || '') !== flat) continue;
+    // Like for like (terraced with terraced) unless the lister asks to include other types.
+    if (!VAL.mkAllTypes && SPRIFT_TYPE[sub.t] && (r.type || '').toLowerCase() !== SPRIFT_TYPE[sub.t]) continue;
     if (sb && r.beds && Math.min(r.beds, 6) !== sb.n) continue;
     if (sb && !r.beds) continue;
     const d = km(here, VAL.pack.pts[r.pc]);
@@ -389,7 +392,8 @@ function buildSections(sub) {
     const R = VAL.mkR || 0.25;
     const html = `${ownLine ? `<p><b>${esc(ownLine)}</b></p>` : ''}
       <div class="seg" id="v-mkr" role="group" aria-label="How far"><button type="button" data-r="0.25" aria-pressed="${R === 0.25}">Within ¼ mile</button><button type="button" data-r="0.5" aria-pressed="${R === 0.5}">Within ½ mile</button></div>
-      <p class="hint">${mk.beds ? `${mk.beds.n === 6 ? '6+' : mk.beds.n}-bed homes only (following the bedrooms above)` : 'All bedrooms (set the bedrooms above to narrow it)'}${sub.sq ? `, sized against this home's ${num0(sub.sq)} sq ft` : ''}.</p>
+      ${SPRIFT_TYPE[sub.t] && sub.t !== 'flat' ? `<div class="seg" id="v-mkt" role="group" aria-label="Which types"><button type="button" data-t="same" aria-pressed="${!VAL.mkAllTypes}">${esc(TYPE_WORD[sub.t].replace(/^./, (c) => c.toUpperCase()))} only</button><button type="button" data-t="all" aria-pressed="${!!VAL.mkAllTypes}">Include other types</button></div>` : ''}
+      <p class="hint">${mk.beds ? `${mk.beds.n === 6 ? '6+' : mk.beds.n}-bed ${VAL.mkAllTypes || !TYPE_WORD[sub.t] ? 'homes of any type' : TYPE_WORD[sub.t] + ' homes only'} (following the bedrooms above)` : 'All bedrooms (set the bedrooms above to narrow it)'}${sub.sq ? `, sized against this home's ${num0(sub.sq)} sq ft` : ''}.</p>
       ${mk.rows.length ? `<ul class="val-list mk-list">${mk.rows.map((x) => `<li class="mk ${x.cls}"><b>${esc(x.r.a.replace(/, Stanford-le-hope$/i, ''))}</b> <span class="mk-tag">${esc(x.tag)}</span><br>
         ${money0(x.r.price)} · ${esc((x.r.type || '').toLowerCase())}${x.sq ? ` · ${num0(x.sq)} sq ft` : ''} · ${esc(miles(x.d))}<br>
         <small>${esc(wk(x.r))}${x.r.reduced ? ` · reduced ${money0(x.r.reducedBy)}` : ''} · ${esc(x.r.agent)}</small></li>`).join('')}</ul>`
@@ -549,6 +553,8 @@ function renderValueHome() {
   });
   const mkr = $('#v-mkr');
   if (mkr) mkr.onclick = (e) => { const b = e.target.closest('button[data-r]'); if (b) { VAL.mkR = +b.dataset.r; rerender(); } };
+  const mkt = $('#v-mkt');
+  if (mkt) mkt.onclick = (e) => { const b = e.target.closest('button[data-t]'); if (b) { VAL.mkAllTypes = b.dataset.t === 'all'; rerender(); } };
   wirePriceSection(rerender);
   $('#v-share').onclick = openValueShare;
 }
