@@ -4,8 +4,15 @@
   --muted: #3d3d3d;
   --line: #b8b8b8;
   --card: #f2f3f5;
-  --pri: #0040a8;
+  --pri: #191933;
   --pri-fg: #ffffff;
+  --link: #191933;
+  /* Griffin brand colours */
+  --navy: #191933;
+  --red: #b11f29;
+  --on-brand: #ffffff;
+  --red-text: #b11f29;
+  --navy-text: #191933;
   --ans: #0a6b2a;
   --na: #0040a8;
   --ncc: #b0101c;
@@ -24,8 +31,11 @@
     --muted: #d0d0d0;
     --line: #5c5c5c;
     --card: #161616;
-    --pri: #3d8bff;
-    --pri-fg: #000000;
+    --pri: #b11f29;
+    --pri-fg: #ffffff;
+    --link: #ff8a92;
+    --red-text: #ff6b74;
+    --navy-text: #ffffff;
     --ans: #2fbf5b;
     --na: #3d8bff;
     --ncc: #ff4d5a;
@@ -53,20 +63,70 @@ h1, h2, h3 { margin: 0 0 8px; line-height: 1.2; }
 h2 { font-size: 1.4rem; }
 h3 { font-size: 1.1rem; }
 p { margin: 0 0 12px; }
-a { color: var(--pri); }
+a { color: var(--link); }
 
-/* Top bar */
+/* Griffin banner (scrolls away) and tab bar (stays at the top) */
+[hidden] { display: none !important; }
+.brand {
+  background: var(--navy); color: var(--on-brand);
+  padding: 14px 16px 10px; padding-top: max(14px, env(safe-area-inset-top));
+}
+.brand img { display: block; height: 44px; width: auto; max-width: 70%; }
+.brand .who { margin: 10px 0 0; font-size: 1.8rem; font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top));
-  background: var(--fg); color: var(--bg);
+  display: flex; background: var(--navy); border-bottom: 4px solid var(--red);
+  padding: 0 4px;
 }
-.topbar button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-.tb-title { font-weight: 800; font-size: 1.05rem; padding: 8px 4px; }
-.tb-status { flex: 1; font-size: 0.8rem; opacity: 0.85; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tb-btn { padding: 10px 10px; font-weight: 700; font-size: 0.9rem; border-radius: 8px; }
-.tb-btn:active { background: rgba(127,127,127,0.3); }
+.tab {
+  flex: 1 1 auto; font: inherit; font-size: 0.9rem; font-weight: 700; color: var(--on-brand);
+  background: none; border: 0; border-bottom: 4px solid transparent; margin-bottom: -4px;
+  padding: 12px 6px; min-height: 48px; cursor: pointer; opacity: 0.75; white-space: nowrap;
+}
+.tab[aria-current=page] { opacity: 1; border-bottom-color: var(--on-brand); }
+.tab:active { background: rgba(255,255,255,0.12); }
+.tb-status { font-size: 0.85rem; font-weight: 700; text-align: center; padding: 6px 12px; background: var(--card); }
+.tb-status:empty { display: none; }
+
+/* Fee calculator */
+.fee-row { display: flex; gap: 8px; align-items: stretch; }
+.fee-input {
+  flex: 1; min-width: 0; display: flex; align-items: center;
+  border: 2px solid var(--line); border-radius: 12px; background: var(--bg); padding: 0 12px;
+}
+.fee-input:focus-within { border-color: var(--red-text); }
+.fee-input span { font-size: 1.4rem; color: var(--muted); }
+.fee-input input[type=text] {
+  flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg);
+  font: inherit; font-size: 1.6rem; font-weight: 600; padding: 12px 6px; border-radius: 0;
+}
+.fee-input input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 400; font-size: 1.1rem; }
+.seg { display: flex; border: 2px solid var(--red); border-radius: 12px; overflow: hidden; }
+.seg button {
+  flex: 1; border: 0; background: var(--bg); color: var(--red-text);
+  font: inherit; font-weight: 700; padding: 10px 16px; min-height: 48px; cursor: pointer;
+}
+.fee-row .seg { flex: 0 0 auto; }
+.fee-row .seg button { font-size: 1.15rem; }
+.seg button[aria-pressed=true] { background: var(--red); color: var(--on-brand); }
+.fee-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.fee-chips button {
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 999px; font: inherit; padding: 6px 14px; min-height: 40px; cursor: pointer;
+}
+.fee-results { background: var(--card); border-left: 8px solid var(--red); border-radius: 16px; padding: 16px; margin: 22px 0 8px; }
+.fee-res { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; }
+.fee-res + .fee-res { border-top: 1px solid var(--line); }
+.fee-res .k { color: var(--muted); }
+.fee-res .v { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.fee-res.big .k { color: var(--fg); font-weight: 600; }
+.fee-res.big .v { font-size: 2rem; font-weight: 800; color: var(--navy-text); }
+.fee-res.inc .v { color: var(--red-text); }
+.fee-note { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+.fee-vat { display: flex; align-items: center; gap: 10px; color: var(--muted); margin-top: 16px; }
+.fee-vat label { margin: 0; font-weight: 400; }
+.fee-vat .fee-input { flex: 0 0 110px; padding: 0 8px; }
+.fee-vat input[type=text] { font-size: 1.1rem; padding: 8px 4px; }
 
 main { padding: 16px 16px 140px; max-width: 640px; margin: 0 auto; }
 
@@ -232,3 +292,4 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .lastknock.never { color: var(--muted); font-weight: 600; }
 .hot-toggle.letter-toggle { margin-top: 10px; border-color: var(--sel); color: var(--sel); }
 .hot-toggle.letter-toggle.on { background: var(--sel); color: #111; }
+.hot-toggle.letter-toggle.letter-top { margin: -6px 0 16px; } /* sits right under the outcome buttons */

@@ -7,24 +7,29 @@
     if (!/\/$|\.html?$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0a0a0a">
-  <meta name="description" content="Plan a door-knocking route, log every door, export a CSV.">
-  <title>Door Knock</title>
+  <meta name="theme-color" content="#191933">
+  <meta name="description" content="Griffin door knocking and fee calculator.">
+  <title>Griffin</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <button class="tb-title" id="tb-home" type="button">Door Knock</button>
-    <span class="tb-status" id="tb-status"></span>
-    <button class="tb-btn" id="tb-runs" type="button">Runs</button>
-    <button class="tb-btn" id="tb-settings" type="button" aria-label="Settings">Settings</button>
+  <header class="brand">
+    <img src="icons/griffin-logo.png" alt="Griffin, the property people" width="619" height="151">
+    <p class="who" id="who" hidden></p>
   </header>
+  <nav class="topbar tabs" aria-label="Sections">
+    <button class="tab" id="tb-home" type="button">Door Knock</button>
+    <button class="tab" id="tb-fees" type="button">Fees</button>
+    <button class="tab" id="tb-runs" type="button">Runs</button>
+    <button class="tab" id="tb-settings" type="button">Settings</button>
+  </nav>
+  <div class="tb-status" id="tb-status"></div>
   <main id="app"><p>Loading…</p></main>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <noscript>Door Knock needs JavaScript turned on.</noscript>
+  <noscript>This app needs JavaScript turned on.</noscript>
   <script src="app.js"></script>
 </body>
 </html>
