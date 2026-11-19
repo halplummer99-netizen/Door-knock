@@ -323,3 +323,9 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .val-before { margin: 8px 0 12px; }
 .val-add .row > .icon-btn { flex: 0 0 48px; }
 .val-add .row > select { flex: 1 1 auto; min-width: 0; }
+.val-bedpick .seg button.guess { outline: 3px dashed var(--red); outline-offset: -5px; }
+.val-beds { width: 100%; border-collapse: collapse; margin: 4px 0 8px; font-size: 0.95rem; }
+.val-beds th, .val-beds td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.val-beds th:first-child, .val-beds td:first-child { text-align: left; }
+.val-beds tr.me td { font-weight: 800; color: var(--red-text); }
+.val-sec h4 { margin: 8px 0 2px; font-size: 0.95rem; }
