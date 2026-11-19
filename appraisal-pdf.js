@@ -172,15 +172,16 @@ const PDFX = (() => {
       d.text(M, top, c.title, 10, { bold: true, c: NAVY });
       if (c.type === 'bars') {
         const vals = c.items.map((i) => i.v).concat(c.ref ? [c.ref.v] : []);
-        const max = Math.max(...vals) * 1.12, min = 0;
+        const max = Math.max(1, ...vals) * 1.12, min = 0, pre = c.fmt == null ? '£' : c.fmt;
         const n = c.items.length, bw = Math.min(46, (pw / n) * 0.62);
         d.line(x0, y0, x0 + pw, y0, LINE);
         c.items.forEach((it, i) => {
           const cx = x0 + (pw / n) * (i + 0.5), bh = ((it.v - min) / (max - min)) * ph;
-          d.rect(cx - bw / 2, y0, bw, bh, NAVY);
-          d.text(cx, y0 + bh + 3, '£' + it.v, 8, { bold: true, c: NAVY, align: 'center' });
+          d.rect(cx - bw / 2, y0, bw, Math.max(bh, 0.5), it.red ? RED : NAVY);
+          d.text(cx, y0 + bh + 3, pre + it.v, pre ? 8 : 11, { bold: true, c: it.red ? RED : NAVY, align: 'center' });
           d.text(cx, y0 - 11, it.label.length > 16 ? it.label.slice(0, 15) + '…' : it.label, 7, { c: GREY, align: 'center' });
         });
+        if (c.note) d.text(W - M, top, c.note, 8, { bold: true, c: NAVY, align: 'right' });
         if (c.ref) { const ry = y0 + ((c.ref.v - min) / (max - min)) * ph; d.line(x0, ry, x0 + pw, ry, RED, 1.4); d.text(W - M, top, 'Red line = ' + c.ref.label + ' per sq ft', 7.5, { bold: true, c: RED, align: 'right' }); }
       } else {
         const ts = c.pts.map((p) => new Date(p.t).getTime());

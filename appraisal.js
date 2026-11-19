@@ -92,7 +92,8 @@ async function loadPack() {
 }
 function setPack(p) {
   VAL.pack = p;
-  VAL.homes = p.homes.map((h, i) => ({ ...h, i, key: (h.a + ' ' + h.pc + ' ' + (h.pc || '').replace(/\s/g, '')).toLowerCase() }));
+  VAL.mkIndex = null;
+  VAL.homes = p.homes.map((h, i) => ({ ...h, t: h.t || (/^(flat|apartment)\b/i.test(h.a) ? 'flat' : undefined), i, key: (h.a + ' ' + h.pc + ' ' + (h.pc || '').replace(/\s/g, '')).toLowerCase() }));
   VAL.home = null;
 }
 function looksLikePack(text) { return /^\s*\{\s*"griffinPack"/.test(text || ''); }
@@ -167,7 +168,7 @@ function comparables(sub) {
 
 function streetFigure(sub) {
   if (!sub.st) return null;
-  const pick = (years) => recentSales(years).filter((x) => x.h.st === sub.st && x.h.pc.slice(0, 4) === sub.pc.slice(0, 4) && x.h.sq && (isHouse(sub.t) ? isHouse(x.h.t) : x.h.t === 'flat'));
+  const pick = (years) => recentSales(years).filter((x) => x.h.st === sub.st && x.h.pc.slice(0, 4) === sub.pc.slice(0, 4) && x.h.sq && (sub.t === 'flat' ? x.h.t === 'flat' : isHouse(x.h.t)));
   let years = 5, rows = pick(5);
   if (rows.length < 5) { years = 10; rows = pick(10); }
   const vals = trimOutliers(rows.map(ppsf));
@@ -261,7 +262,22 @@ function marketSameBeds(sub, radiusMi) {
   }
   const rank = { g: 0, a: 1, x: 2 };
   out.sort((x, y) => rank[x.cls] - rank[y.cls] || x.d - y.d);
-  return { rows: out.slice(0, 12), all: out.length, own, beds: sb };
+  return { rows: out.slice(0, 12), all: out.length, own, beds: sb, stats: marketMoves(sub, rows, sb) };
+}
+
+// How similar homes nearby are doing on the market (Sprift): same type and bedrooms within a mile,
+// widened to any bedrooms if fewer than 5. For sale now, cut their price, withdrawn, fell through.
+function marketMoves(sub, rows, sb) {
+  const here = VAL.pack.pts[sub.pc];
+  const typeOk = (r) => !SPRIFT_TYPE[sub.t] || (r.type || '').toLowerCase() === SPRIFT_TYPE[sub.t];
+  const all = (VAL.pack.market || []).filter((r) => r.price >= 50000 && typeOk(r) && (km(here, VAL.pack.pts[r.pc]) ?? 99) <= 1.609);
+  let pool = sb ? all.filter((r) => r.beds && Math.min(r.beds, 6) === sb.n) : all;
+  let label = sb ? `${sb.n === 6 ? '6+' : sb.n}-bed ${TYPE_WORD[sub.t] || ''} homes within a mile` : `${TYPE_WORD[sub.t] || 'similar'} homes within a mile`;
+  if (pool.length < 5) { pool = all; label = `${TYPE_WORD[sub.t] || 'similar'} homes within a mile (all bedrooms)`; }
+  if (pool.length < 3) return null;
+  const live = pool.filter((r) => !r.withdrawn && !r.fell);
+  const weeks = quant(live.map((r) => weeksOn(r.listed)).filter((w) => w != null), 0.5);
+  return { label: label.replace(/\s+/g, ' '), forSale: live.length, reduced: pool.filter((r) => r.reduced).length, withdrawn: pool.filter((r) => r.withdrawn).length, fell: pool.filter((r) => r.fell).length, weeks: weeks != null ? Math.round(weeks) : null };
 }
 
 function marketNow(sub) {
@@ -399,7 +415,12 @@ function buildSections(sub) {
         <small>${esc(wk(x.r))}${x.r.reduced ? ` · reduced ${money0(x.r.reducedBy)}` : ''} · ${esc(x.r.agent)}</small></li>`).join('')}</ul>`
         : `<p class="hint">No ${mk.beds ? mk.beds.n + '-bed ' : ''}homes for sale within ${R === 0.25 ? '¼' : '½'} mile.${R === 0.25 ? ' Try ½ mile.' : ''}</p>`}
       <p class="hint"><span class="mk-key g">similar size</span> <span class="mk-key a">10–25% bigger or smaller</span> <span class="mk-key x">much bigger or smaller, or size unknown</span> · Sprift, ${esc(prettyDate(VAL.pack.spriftDate))}.</p>`;
-    secs.push({ id: 'market', title: 'For sale nearby now', html, text: [ownLine, ...mk.rows.map((x) => '• ' + line(x))].filter(Boolean).join('\n'), on: false });
+    const S2 = mk.stats;
+    const movesLine = S2 ? `How the local market is moving (${S2.label}): ${S2.forSale} for sale now${S2.weeks != null ? `, typically ${S2.weeks} weeks on the market` : ''}; ${S2.reduced} ${S2.reduced === 1 ? "has" : "have"} cut their price, ${S2.withdrawn} withdrawn, ${S2.fell} fell through.` : '';
+    const movesHtml = S2 ? `<div class="mk-moves"><b>How the local market is moving</b><small>${esc(S2.label)}</small>
+      <div class="mk-stats"><span><b>${S2.forSale}</b>for sale now</span><span><b>${S2.weeks != null ? S2.weeks : '–'}</b>weeks on (typical)</span><span class="bad"><b>${S2.reduced}</b>cut their price</span><span class="bad"><b>${S2.withdrawn}</b>withdrawn</span><span class="bad"><b>${S2.fell}</b>fell through</span></div></div>` : '';
+    const chart = S2 ? { type: 'bars', fmt: '', title: `How the local market is moving: ${S2.label}`, items: [{ label: 'For sale now', v: S2.forSale }, { label: 'Cut their price', v: S2.reduced, red: true }, { label: 'Withdrawn', v: S2.withdrawn, red: true }, { label: 'Fell through', v: S2.fell, red: true }], note: S2.weeks != null ? `Typically ${S2.weeks} weeks on the market` : '' } : null;
+    secs.push({ id: 'market', title: 'For sale nearby now', html: html.replace('<div class="seg" id="v-mkr"', movesHtml + '<div class="seg" id="v-mkr"'), text: [ownLine, movesLine, ...mk.rows.map((x) => '• ' + line(x))].filter(Boolean).join('\n'), on: false, chart });
   }
   if (sub === VAL.home && VAL.finalPrice) { const st = strategySection(sub); if (st) secs.push(st); }
   return { secs, comps, sf };
@@ -650,7 +671,8 @@ function pdfData(ticks, note) {
     if (x.id === 'strategy') return { title: x.title, ladder: x.ladder, lines };
     if (x.id === 'comps') return { title: x.title, table: x.table, lines: [x.note], chart: { type: 'bars', title: '£ per sq ft of each sale (today\'s money)', items: x.table.rows.map((rw, i) => ({ label: rw.cells[0].replace(/\s+(Road|Avenue|Drive|Close|Way|Lane|Street|Gardens|Crescent)$/i, ''), v: parseInt(rw.cells[5].replace(/[^\d]/g, ''), 10) })), ref: (() => { const f = streetFigure(sub); return f && f.ok ? { v: f.med, label: `${sub.st} £${Math.round(f.med)}` } : null; })() } };
     if (x.id === 'beds') return { title: x.title, table: x.table, lines };
-    if (x.id === 'street' || x.id === 'range') return { title: x.title, lines: lines.map((l) => l.replace(/^[^:]+: (?=£)/, '')), chart: x.id === 'street' ? streetChart(sub) : null };
+    if (x.id === 'street' || x.id === 'range') return { title: x.title, lines: lines.map((l) => l.replace(/^[^:]+: (?=£)/, '')) };
+    if (x.id === 'market') return { title: x.title, chart: x.chart, lines };
     return { title: x.title, lines };
   });
   const from = S.settings.name ? `${S.settings.name}, Griffin` : 'Griffin';
@@ -659,18 +681,6 @@ function pdfData(ticks, note) {
     disclaimer: valueFooter(!!ticks.market), buttons: contactButtons() };
 }
 
-// Every open-market sale on the street over 10 years, this home's own sales marked, and today's price line.
-function streetChart(sub) {
-  if (!sub.st) return null;
-  const since = new Date(new Date(VAL.pack.built).getTime() - 10 * YEAR_MS).toISOString().slice(0, 10);
-  const pts = [];
-  for (const h of VAL.homes) {
-    if (h.st !== sub.st || h.pc.slice(0, 4) !== sub.pc.slice(0, 4)) continue;
-    for (const x of h.s || []) if (x[0] >= since && !x[4]) pts.push({ t: x[0], p: x[1], me: h === sub });
-  }
-  if (pts.length < 4) return null;
-  return { type: 'scatter', title: `Sales on ${sub.st}, last 10 years`, pts, line: VAL.finalPrice ? { v: VAL.finalPrice, label: 'Our price today' } : null };
-}
 const pdfName = () => `Market appraisal - ${VAL.home.a}.pdf`.replace(/[\\/:*?"<>|]/g, '');
 
 async function openValueShare() {
