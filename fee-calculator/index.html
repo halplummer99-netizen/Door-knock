@@ -60,6 +60,7 @@
       flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg);
       font: inherit; font-size: 1.6rem; font-weight: 600; padding: 12px 6px;
     }
+    input::placeholder { color: var(--muted); opacity: 0.7; font-weight: 400; font-size: 1.1rem; }
     .block { margin-bottom: 18px; }
     .seg { display: flex; border: 2px solid var(--red); border-radius: 12px; overflow: hidden; }
     .seg button {
@@ -98,7 +99,7 @@
   <main>
     <div class="block">
       <label class="field" for="price">Price</label>
-      <div class="input-wrap"><span>£</span><input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="350,000" enterkeyhint="next"></div>
+      <div class="input-wrap"><span>£</span><input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="Type the price" enterkeyhint="next"></div>
     </div>
 
     <div class="block">
@@ -243,6 +244,12 @@
     render();
 
     if ('serviceWorker' in navigator) {
+      // When a new version has downloaded, reload once so it shows straight away.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadController && !reloading) { reloading = true; location.reload(); }
+      });
       window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
     }
   </script>
