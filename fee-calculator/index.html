@@ -2,6 +2,10 @@
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
+  <script>
+    // Without a trailing slash the browser looks for styles and scripts in the wrong folder; add it.
+    if (!/\/$|\.html?$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0040a8">
   <meta name="description" content="Put in the price and the fee; see the fee before and including VAT.">
