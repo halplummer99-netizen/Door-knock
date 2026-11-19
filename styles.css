@@ -293,3 +293,23 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .hot-toggle.letter-toggle { margin-top: 10px; border-color: var(--sel); color: var(--sel); }
 .hot-toggle.letter-toggle.on { background: var(--sel); color: #111; }
 .hot-toggle.letter-toggle.letter-top { margin: -6px 0 16px; } /* sits right under the outcome buttons */
+
+/* Valuation tab */
+.val-results li { cursor: pointer; }
+.val-sec { background: var(--card); border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+.val-sec h3 { margin: 0 0 6px; color: var(--navy-text); }
+.val-sec p { margin: 6px 0; }
+.val-big { font-size: 1.6rem; font-weight: 800; color: var(--red-text); margin: 4px 0; }
+.val-big small { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+.val-list { margin: 6px 0; padding-left: 18px; }
+.val-list li { margin: 6px 0; }
+.val-list.comps { list-style: none; padding-left: 0; }
+.val-list.comps li { border-top: 1px solid var(--line); padding-top: 6px; }
+.val-list small { color: var(--muted); }
+.val-sec select { width: 100%; margin-bottom: 8px; }
+.val-sec .seg { margin: 6px 0; }
+.val-ticks { display: grid; gap: 4px; margin: 8px 0 12px; }
+.val-tick { display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 600; }
+.val-tick input { width: 22px; height: 22px; }
+.val-share textarea { width: 100%; font-size: 0.9rem; }
+.val-tick input { appearance: auto; accent-color: var(--red); }
