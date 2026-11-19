@@ -39,7 +39,7 @@ function km(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-const miles = (k) => (k == null ? '' : k < 0.16 ? 'next door to ¼ mile' : (k / 1.609).toFixed(1) + ' mi');
+const miles = (k) => (k == null ? '' : k < 0.16 ? 'under 0.1 mi' : (k / 1.609).toFixed(1) + ' mi');
 const isHouse = (t) => t && t !== 'flat';
 const sameKind = (a, b) => (a && b ? a === b : true);
 // Drop wild £/sq ft figures (wrong EPC size, a plot sale) before quoting anything.
@@ -227,6 +227,43 @@ function evidenceRange(sub, comps) {
   return null;
 }
 
+// Listings with the same bedrooms within a radius (miles), each matched to its EPC size and coloured
+// green (within 10% of this home), amber (10-25%) or grey (more, or unknown). Closest and most similar first.
+const SPRIFT_TYPE = { terraced: 'terraced', semi: 'semi-detached', detached: 'detached', flat: 'flat' };
+function marketSameBeds(sub, radiusMi) {
+  const rows = (VAL.pack.market || []).filter((r) => !r.withdrawn && !r.fell && r.price >= 50000);
+  const here = VAL.pack.pts[sub.pc];
+  const sb = bedsOf(sub);
+  const flat = sub.t === 'flat';
+  const num = (a) => (/^(?:flat\s*\w+,\s*)?(\d+[a-z]?)\b/i.exec(a) || [])[1];
+  const own = rows.find((r) => r.pc === sub.pc && num(r.a) && num(r.a) === num(sub.a)) || null;
+  if (!VAL.mkIndex) {
+    VAL.mkIndex = new Map();
+    for (const h of VAL.homes) { const n = num(h.a); if (n && h.sq) VAL.mkIndex.set(h.pc + '|' + n.toLowerCase(), h); }
+  }
+  const out = [];
+  for (const r of rows) {
+    if (r === own) continue;
+    if (/flat|maisonette|apartment/i.test(r.type || '') !== flat) continue;
+    // Like for like (terraced with terraced) unless the lister asks to include other types.
+    if (!VAL.mkAllTypes && SPRIFT_TYPE[sub.t] && (r.type || '').toLowerCase() !== SPRIFT_TYPE[sub.t]) continue;
+    if (sb && r.beds && Math.min(r.beds, 6) !== sb.n) continue;
+    if (sb && !r.beds) continue;
+    const d = km(here, VAL.pack.pts[r.pc]);
+    if (d == null || d > radiusMi * 1.609) continue;
+    const n = num(r.a);
+    const h = n ? VAL.mkIndex.get(r.pc + '|' + n.toLowerCase()) : null;
+    const sq = h ? h.sq : null;
+    const diff = sq && sub.sq ? (sq - sub.sq) / sub.sq : null;
+    const cls = diff == null ? 'x' : Math.abs(diff) < 0.1 ? 'g' : Math.abs(diff) <= 0.25 ? 'a' : 'x';
+    const tag = diff == null ? 'size unknown' : Math.abs(diff) < 0.1 ? 'similar size' : `${Math.abs(Math.round(diff * 100))}% ${diff > 0 ? 'bigger' : 'smaller'}`;
+    out.push({ r, d, sq, diff, cls, tag });
+  }
+  const rank = { g: 0, a: 1, x: 2 };
+  out.sort((x, y) => rank[x.cls] - rank[y.cls] || x.d - y.d);
+  return { rows: out.slice(0, 12), all: out.length, own, beds: sb };
+}
+
 function marketNow(sub) {
   const rows = VAL.pack.market || [];
   if (!rows.length) return { rows: [], own: null };
@@ -345,12 +382,24 @@ function buildSections(sub) {
     secs.push({ id: 'space', title: 'Extra space measured', html: `<ul class="val-list">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${withIt ? `<p><b>${esc(withIt)}</b></p>` : ''}`, text: lines.map((l) => '• ' + l).join('\n') + (withIt ? '\n' + withIt : ''), on: true });
   }
 
-  // 7. On the market now (Sprift)
-  const mk = marketNow(sub);
-  if (mk.own || mk.rows.length) {
+  // 7. For sale nearby now (Sprift): same bedrooms, within ¼ or ½ mile, coloured by size against this home.
+  const mk = marketSameBeds(sub, VAL.mkR || 0.25);
+  if (mk.own || mk.all) {
     const ownLine = mk.own ? `This home: on with ${mk.own.agent} at ${money0(mk.own.price)} since ${monthYear(mk.own.listed)}${mk.own.reduced ? ` (reduced ${money0(mk.own.reducedBy)} in ${monthYear(mk.own.reduced)})` : ''}${mk.own.withdrawn ? `, withdrawn ${monthYear(mk.own.withdrawn)}` : ''}.` : '';
-    const lines = mk.rows.map(({ r }) => `${r.a}: ${money0(r.price)}${r.beds ? `, ${r.beds} bed` : ''} ${(r.type || '').toLowerCase()}, ${weeksOn(r.listed)} week${weeksOn(r.listed) === 1 ? '' : 's'} on${r.reduced ? `, reduced ${money0(r.reducedBy)}` : ''} (${r.agent})`);
-    secs.push({ id: 'market', title: 'For sale nearby now', html: `${ownLine ? `<p><b>${esc(ownLine)}</b></p>` : ''}<ul class="val-list">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul><p class="hint">Sprift, ${esc(prettyDate(VAL.pack.spriftDate))}.</p>`, text: lines.map((l) => '• ' + l).join('\n'), on: false });
+    const wk = (r) => `${weeksOn(r.listed)} week${weeksOn(r.listed) === 1 ? '' : 's'} on`;
+    const sizeTxt = (x) => (x.diff == null ? 'size unknown' : Math.abs(x.diff) < 0.1 ? `similar size${x.sq ? ' (' + num0(x.sq) + ' sq ft)' : ''}` : `${num0(x.sq)} sq ft, ${Math.abs(Math.round(x.diff * 100))}% ${x.diff > 0 ? 'bigger' : 'smaller'}`);
+    const line = (x) => `${x.r.a.replace(/, Stanford-le-hope$/i, '')}: ${money0(x.r.price)}, ${(x.r.type || '').toLowerCase()}, ${sizeTxt(x)}, ${wk(x.r)}${x.r.reduced ? `, reduced ${money0(x.r.reducedBy)}` : ''} (${x.r.agent})`;
+    const R = VAL.mkR || 0.25;
+    const html = `${ownLine ? `<p><b>${esc(ownLine)}</b></p>` : ''}
+      <div class="seg" id="v-mkr" role="group" aria-label="How far"><button type="button" data-r="0.25" aria-pressed="${R === 0.25}">Within ¼ mile</button><button type="button" data-r="0.5" aria-pressed="${R === 0.5}">Within ½ mile</button></div>
+      ${SPRIFT_TYPE[sub.t] && sub.t !== 'flat' ? `<div class="seg" id="v-mkt" role="group" aria-label="Which types"><button type="button" data-t="same" aria-pressed="${!VAL.mkAllTypes}">${esc(TYPE_WORD[sub.t].replace(/^./, (c) => c.toUpperCase()))} only</button><button type="button" data-t="all" aria-pressed="${!!VAL.mkAllTypes}">Include other types</button></div>` : ''}
+      <p class="hint">${mk.beds ? `${mk.beds.n === 6 ? '6+' : mk.beds.n}-bed ${VAL.mkAllTypes || !TYPE_WORD[sub.t] ? 'homes of any type' : TYPE_WORD[sub.t] + ' homes only'} (following the bedrooms above)` : 'All bedrooms (set the bedrooms above to narrow it)'}${sub.sq ? `, sized against this home's ${num0(sub.sq)} sq ft` : ''}.</p>
+      ${mk.rows.length ? `<ul class="val-list mk-list">${mk.rows.map((x) => `<li class="mk ${x.cls}"><b>${esc(x.r.a.replace(/, Stanford-le-hope$/i, ''))}</b> <span class="mk-tag">${esc(x.tag)}</span><br>
+        ${money0(x.r.price)} · ${esc((x.r.type || '').toLowerCase())}${x.sq ? ` · ${num0(x.sq)} sq ft` : ''} · ${esc(miles(x.d))}<br>
+        <small>${esc(wk(x.r))}${x.r.reduced ? ` · reduced ${money0(x.r.reducedBy)}` : ''} · ${esc(x.r.agent)}</small></li>`).join('')}</ul>`
+        : `<p class="hint">No ${mk.beds ? mk.beds.n + '-bed ' : ''}homes for sale within ${R === 0.25 ? '¼' : '½'} mile.${R === 0.25 ? ' Try ½ mile.' : ''}</p>`}
+      <p class="hint"><span class="mk-key g">similar size</span> <span class="mk-key a">10–25% bigger or smaller</span> <span class="mk-key x">much bigger or smaller, or size unknown</span> · Sprift, ${esc(prettyDate(VAL.pack.spriftDate))}.</p>`;
+    secs.push({ id: 'market', title: 'For sale nearby now', html, text: [ownLine, ...mk.rows.map((x) => '• ' + line(x))].filter(Boolean).join('\n'), on: false });
   }
   if (sub === VAL.home && VAL.finalPrice) { const st = strategySection(sub); if (st) secs.push(st); }
   return { secs, comps, sf };
@@ -374,12 +423,14 @@ async function renderValue() {
     <label for="v-q">House number and street, or postcode</label>
     <input type="text" id="v-q" autocomplete="off" enterkeyhint="search" placeholder="e.g. 42 Silvertown Avenue" value="${esc(VAL.query)}">
     <ul class="stops val-results" id="v-res"></ul>
-    <p class="meta">${num0(P.homes.length)} homes · sales to ${esc(prettyDate(P.landRegistryLatest))}${P.spriftDate ? ` · Sprift ${esc(prettyDate(P.spriftDate))}` : ''} · pack built ${esc(prettyDate(P.built))}</p>
+    <p class="meta">${num0(P.homes.length)} homes · sales to ${esc(prettyDate(P.landRegistryLatest))}${P.spriftDate ? ` · Sprift ${esc(prettyDate(P.spriftDate))}` : ''} · pack built ${esc(prettyDate(P.built))}<br>App version <span id="v-appver">…</span></p>
     ${age > 10 ? `<div class="notice warn">This pack is ${age} days old. Load this week's one from the Door Knock list folder.</div>` : ''}
     <div id="v-sentbox"></div>
     <div class="stack"><button class="btn small" id="v-load" type="button">Load a newer area pack</button></div>
     <input type="file" id="v-file" accept=".json,application/json,text/plain" hidden>`;
   wirePackLoad();
+  // The app version is the name of the offline copy the phone is running (dk-v18 = has the PDF and everything since).
+  if (window.caches) caches.keys().then((k) => { const v = k.filter((x) => /^dk-v\d+$/.test(x)).sort((x, y) => +x.slice(4) - +y.slice(4)).pop(); const el = $('#v-appver'); if (el) el.textContent = v || 'not installed'; });
   sentListHtml().then((h) => { if (h && $('#v-sentbox')) { $('#v-sentbox').innerHTML = h; wireSentList(); } });
   const show = () => {
     VAL.query = $('#v-q').value;
@@ -500,6 +551,10 @@ function renderValueHome() {
     }
     rerender();
   });
+  const mkr = $('#v-mkr');
+  if (mkr) mkr.onclick = (e) => { const b = e.target.closest('button[data-r]'); if (b) { VAL.mkR = +b.dataset.r; rerender(); } };
+  const mkt = $('#v-mkt');
+  if (mkt) mkt.onclick = (e) => { const b = e.target.closest('button[data-t]'); if (b) { VAL.mkAllTypes = b.dataset.t === 'all'; rerender(); } };
   wirePriceSection(rerender);
   $('#v-share').onclick = openValueShare;
 }
