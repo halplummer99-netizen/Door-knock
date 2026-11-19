@@ -144,7 +144,14 @@ contacts and fees stay on their own phone.
 1. In the app, go to **Settings → Set up a colleague**, type their full name (e.g. `Ian Divers`) and tap **Share their link**.
    The link contains their name and your Google key, so route planning works for them straight away.
    Their usage goes on your Google bill, so keep the £10 budget alert from step 2 switched on.
-2. They open the link in **Chrome** and tap **⋮ → Add to Home screen → Install**.
+2. They open the link on their phone. The app shows an **Install the app** box that suits the device:
+   - **Android (Chrome):** an **Install the app** button. If it isn't there yet: **⋮ → Add to Home screen → Install**.
+   - **iPhone:** steps for **Safari → Share → Add to Home Screen**. iPhone keeps the home-screen app separate from Safari,
+     so they tap **Copy my setup link** first, then once installed open the app and paste it into
+     **Settings → Paste your setup link**. (If they opened it in Chrome on iPhone, the box tells them to use Safari.)
+   - **Computer:** a QR code of their link to scan with their phone. It contains your key, so only show it to them.
+
+   The box disappears once the app is installed, and **✕** hides it for now.
 3. They go to **Settings**, put in their usual start and end postcodes, and tap **Save settings**.
 
 Your own link is `https://halplummer99-netizen.github.io/Door-knock/?name=Hal+Plummer`. A link with a name only

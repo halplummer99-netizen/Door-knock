@@ -1351,8 +1351,14 @@ async function renderSettings() {
   let persisted = null;
   try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null; } catch (e) { /* ignore */ }
   const host = location.hostname ? `${location.protocol}//${location.host}/*` : 'https://YOUR-NAME.github.io/*';
+  const pasteBlock = `
+    <h3 style="margin-top:${st.apiKey ? 24 : 8}px">Paste your setup link</h3>
+    <p class="hint">On iPhone the home-screen app doesn't share what Safari saved. Paste the link you were sent to put your name and the Google key in.</p>
+    <input type="text" id="p-link" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="https://…/Door-knock/?name=…">
+    <div class="stack"><button class="btn" id="p-use" type="button">Use this link</button></div>`;
   app.innerHTML = `
     <h2>Settings</h2>
+    ${st.apiKey ? '' : pasteBlock}
     <label for="s-name">Your name</label>
     <input type="text" id="s-name" value="${esc(st.name)}" maxlength="40" autocomplete="name">
     <div class="hint">Shown at the top of the app.</div>
@@ -1378,6 +1384,7 @@ async function renderSettings() {
     <input type="text" id="c-name" maxlength="40" autocomplete="off" placeholder="e.g. Ian Divers">
     <div class="stack"><button class="btn" id="c-share" type="button">Share their link</button></div>
     <div id="c-result" class="notice info" hidden style="overflow-wrap:anywhere"></div>` : ''}
+    ${st.apiKey ? pasteBlock : ''}
     <p class="hint" style="margin-top:16px">Storage: ${persisted === true ? 'protected ✓ (Android won’t clear it)' : persisted === false ? 'not yet protected. Install the app to your home screen to protect it.' : 'unknown'}</p>
 
     <details>
@@ -1427,11 +1434,23 @@ async function renderSettings() {
     }
     out.hidden = false;
   };
+  $('#p-use').onclick = async () => {
+    const got = parseSetupLink($('#p-link').value);
+    if (!got) { toast('That doesn’t look like a setup link. Copy the whole link you were sent.'); return; }
+    const keyChanged = got.apiKey && got.apiKey !== S.settings.apiKey;
+    S.settings = { ...S.settings, ...got };
+    await DB.put('kv', S.settings, 'settings');
+    showTabs();
+    renderInstall();
+    toast(`Set up${got.name ? ' for ' + got.name : ''}${got.apiKey ? ', Google key added' : ''}.`);
+    if (keyChanged && mapsPromise) setTimeout(() => location.reload(), 900); else renderSettings();
+  };
   $('#s-save').onclick = async () => {
     const before = S.settings.apiKey;
     S.settings = read();
     await DB.put('kv', S.settings, 'settings');
     showTabs();
+    renderInstall();
     if (before && before !== S.settings.apiKey && mapsPromise) {
       toast('Saved. Restarting to use the new key…');
       setTimeout(() => location.reload(), 900);
@@ -1498,10 +1517,87 @@ async function takeShare() {
 function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40); }
 function colleagueLink(name, key) {
   const base = location.origin + location.pathname.replace(/[^/]*$/, '');
-  const q = new URLSearchParams({ name });
+  const q = new URLSearchParams();
+  if (name) q.set('name', name);
   if (key) q.set('key', key);
-  return base + '?' + q.toString().replace(/%20/g, '+');
+  const qs = q.toString().replace(/%20/g, '+');
+  return base + (qs ? '?' + qs : '');
 }
+// Reads name/key out of a pasted setup link (or just its ?name=…&key=… part).
+function parseSetupLink(text) {
+  let q;
+  try { q = new URL(String(text).trim(), location.href).searchParams; } catch (e) { return null; }
+  const out = {};
+  const name = cleanName(q.get('name'));
+  const key = (q.get('key') || '').trim();
+  if (name) out.name = name;
+  if (/^[\w-]{20,60}$/.test(key)) out.apiKey = key;
+  return Object.keys(out).length ? out : null;
+}
+
+/* ---------------- Install guide ---------------- */
+// Shown when the app is opened in a browser rather than from the home screen:
+// an Install button on Android, Safari steps on iPhone, a QR code on a computer.
+const INSTALL = { prompt: null };
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function deviceKind() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (ios) return /CriOS|FxiOS|EdgiOS|OPiOS/.test(ua) ? 'ios-other' : 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'computer';
+}
+async function copyText(text, btn) {
+  try { await navigator.clipboard.writeText(text); btn.textContent = '✓ Copied'; }
+  catch (e) { btn.insertAdjacentHTML('afterend', `<p class="hint" style="overflow-wrap:anywhere;user-select:all">${esc(text)}</p>`); }
+}
+async function renderInstall() {
+  const box = $('#install');
+  if (isStandalone() || INSTALL.done || sessionStorage.getItem('dk-install-hidden')) { box.hidden = true; return; }
+  let installed = false;
+  try { if (navigator.getInstalledRelatedApps) installed = (await navigator.getInstalledRelatedApps()).length > 0; } catch (e) { /* ignore */ }
+  const kind = deviceKind();
+  const link = colleagueLink(S.settings.name, S.settings.apiKey);
+  const personal = !!(S.settings.name || S.settings.apiKey);
+  let body;
+  if (installed) {
+    body = '<p>The app is already on this phone. Open <b>Griffin</b> from your home screen.</p>';
+  } else if (kind === 'android') {
+    body = INSTALL.prompt
+      ? '<p>Put the app on your home screen. It then opens like any other app and works with no signal.</p><button class="btn pri big" id="ins-go" type="button">Install the app</button>'
+      : '<p>Put the app on your home screen: in Chrome, tap <b>⋮</b> (top right), then <b>Add to Home screen</b>, then <b>Install</b>.</p>';
+  } else if (kind === 'ios') {
+    body = `<ol class="ins-steps">
+        ${personal ? '<li>Tap <b>Copy my setup link</b> below.</li>' : ''}
+        <li>Tap the <b>Share</b> button (the square with an arrow pointing up) at the bottom of Safari.</li>
+        <li>Scroll down, tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+        ${personal ? '<li>Open <b>Griffin</b> from your home screen, go to <b>Settings</b> and paste the link into <b>Paste your setup link</b>. (iPhone keeps the home-screen app separate from Safari, so this carries your name and key across.)</li>' : ''}
+      </ol>
+      ${personal ? '<button class="btn" id="ins-copy" type="button">Copy my setup link</button>' : ''}`;
+  } else if (kind === 'ios-other') {
+    body = '<p>On iPhone the app installs from <b>Safari</b>. Copy the link, open Safari, paste it into the address bar, and follow the steps it shows.</p><button class="btn" id="ins-copy" type="button">Copy the link</button>';
+  } else {
+    body = `<p>To put the app on a phone, scan this with the phone's camera and follow the install steps it shows.</p>
+      <div class="ins-qr">${QR.svg(link, { label: 'QR code for the app link' })}</div>
+      ${S.settings.apiKey ? '<p class="hint">This code includes your name and Google key, so only show it to the person it’s for.</p>' : ''}`;
+  }
+  box.innerHTML = `<div class="ins-head"><h3>Install the app</h3><button class="icon-btn" id="ins-hide" type="button" aria-label="Hide install steps">✕</button></div>${body}`;
+  box.hidden = false;
+  $('#ins-hide').onclick = () => { sessionStorage.setItem('dk-install-hidden', '1'); box.hidden = true; };
+  if ($('#ins-copy')) $('#ins-copy').onclick = (e) => copyText(link, e.currentTarget);
+  if ($('#ins-go')) $('#ins-go').onclick = async () => {
+    const ev = INSTALL.prompt;
+    INSTALL.prompt = null;
+    if (!ev) return renderInstall();
+    ev.prompt();
+    const choice = await ev.userChoice.catch(() => null);
+    if (choice && choice.outcome === 'accepted') { INSTALL.done = true; toast('Installed. Open Griffin from your home screen.'); }
+    renderInstall();
+  };
+}
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); INSTALL.prompt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { INSTALL.prompt = null; INSTALL.done = true; renderInstall(); });
+matchMedia('(display-mode: standalone)').addEventListener('change', () => renderInstall());
 async function takeLinkSetup() {
   const q = new URLSearchParams(location.search);
   if (!q.has('name') && !q.has('key') && !q.has('tab')) return false;
@@ -1627,6 +1723,7 @@ async function init() {
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if (await takeShare()) return;
   const wantFees = await takeLinkSetup();
+  renderInstall();
   S.view = wantFees ? 'fees'
     : !S.settings.apiKey && !S.run ? 'settings'
     : S.run && S.run.status === 'active' ? 'door'
