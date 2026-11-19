@@ -292,3 +292,4 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .lastknock.never { color: var(--muted); font-weight: 600; }
 .hot-toggle.letter-toggle { margin-top: 10px; border-color: var(--sel); color: var(--sel); }
 .hot-toggle.letter-toggle.on { background: var(--sel); color: #111; }
+.hot-toggle.letter-toggle.letter-top { margin: -6px 0 16px; } /* sits right under the outcome buttons */

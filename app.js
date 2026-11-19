@@ -942,6 +942,7 @@ function renderDoor() {
       <div class="outcomes" role="group" aria-label="Outcome">
         ${OUTCOMES.map((o, n) => `<button type="button" class="outcome${L.outcome === o.k ? ' on' : ''}" data-o="${o.k}"><span class="n"><i>${n + 1}</i></span><span>${esc(o.label)}</span></button>`).join('')}
       </div>
+      <button type="button" class="hot-toggle letter-toggle letter-top${L.letter_delivered ? ' on' : ''}" id="letter" aria-pressed="${!!L.letter_delivered}">${letterLabel(L)}</button>
 
       <div id="ans" ${L.outcome === 'answered' ? '' : 'hidden'}>
         <label for="f-name">Name</label>
@@ -963,7 +964,6 @@ function renderDoor() {
 
       <button type="button" class="hot-toggle${L.hot_lead ? ' on' : ''}" id="hot" aria-pressed="${L.hot_lead}">${L.hot_lead ? '🔥 HOT LEAD' : 'Mark as hot lead'}</button>
       <button type="button" class="hot-toggle xmas-toggle${L.christmas_card ? ' on' : ''}" id="xmas" aria-pressed="${!!L.christmas_card}">${xmasLabel(L.christmas_card)}</button>
-      <button type="button" class="hot-toggle letter-toggle${L.letter_delivered ? ' on' : ''}" id="letter" aria-pressed="${!!L.letter_delivered}">${letterLabel(L)}</button>
       <label for="f-fu">Follow-up date (optional)</label>
       <input type="date" id="f-fu" data-f="follow_up_date" value="${esc(L.follow_up_date)}">
 
