@@ -507,13 +507,14 @@ window.addEventListener('popstate', (e) => {
 });
 $('#tb-home').onclick = () => go(S.run && S.run.status === 'active' ? 'door' : S.run && S.run.status === 'planning' ? 'review' : 'setup');
 $('#tb-fees').onclick = () => go('fees');
+$('#tb-value').onclick = () => go('value');
 $('#tb-runs').onclick = () => go('history');
 $('#tb-settings').onclick = () => go('settings');
 
-const TAB_OF = { fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
+const TAB_OF = { value: 'tb-value', fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
 function showTabs() {
   const on = TAB_OF[S.view] || 'tb-home';
-  for (const id of ['tb-home', 'tb-fees', 'tb-runs', 'tb-settings']) {
+  for (const id of ['tb-home', 'tb-value', 'tb-fees', 'tb-runs', 'tb-settings']) {
     if (id === on) $('#' + id).setAttribute('aria-current', 'page'); else $('#' + id).removeAttribute('aria-current');
   }
   $('#who').textContent = S.settings.name || '';
@@ -524,7 +525,7 @@ function render() {
   showTabs();
   if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings, fees: renderFees }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;
@@ -937,6 +938,7 @@ function renderDoor() {
       ${s.geo === 'fail' ? `<div class="notice bad">No map pin for this one. Navigate will search the address.</div>` : ''}
       ${s.geo === 'check' ? `<div class="notice warn">${esc(s.note)}</div>` : ''}
       <a class="btn" href="${esc(navUrl(s))}" target="_blank" rel="noopener">Navigate here</a>
+      <button class="btn" id="d-value" type="button">Market appraisal</button>
       <div class="gps" id="gps">${esc(gpsText(s))}</div>
 
       <div class="outcomes" role="group" aria-label="Outcome">
@@ -1033,6 +1035,7 @@ function renderDoor() {
     $('#xmas').textContent = xmasLabel(L.christmas_card);
     touch();
   };
+  $('#d-value').onclick = () => openValueFor(s.address, s.postcode);
   $('#letter').onclick = () => {
     L.letter_delivered = !L.letter_delivered;
     L.letter_at = L.letter_delivered ? nowIso() : '';
@@ -1479,6 +1482,15 @@ async function takeShare() {
   const sh = await DB.get('kv', 'pendingShare');
   if (!sh) return false;
   await DB.del('kv', 'pendingShare');
+  // An area pack for the Market appraisal tab comes in the same way as a door list.
+  const pack = (sh.files || []).find((f) => looksLikePack(f.text));
+  if (pack) {
+    S.view = 'value';
+    history.replaceState({ view: 'value' }, '');
+    await savePackText(pack.text);
+    render();
+    return true;
+  }
   const lines = [];
   for (const f of sh.files || []) lines.push(...csvToLines(f.text));
   const text = [sh.title, sh.text].filter(Boolean).join('\n');
