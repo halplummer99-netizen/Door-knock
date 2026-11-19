@@ -1,13 +1,14 @@
 // Fee Calculator service worker: lets the app open with no signal.
 // Bump VERSION whenever the files change so phones pick up the new copy.
-const VERSION = 'fee-v3';
+const VERSION = 'fee-v4';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/icon-512-maskable.png'
+  './icons/icon-512-maskable.png',
+  './icons/griffin-logo.png'
 ];
 
 self.addEventListener('install', (e) => {
