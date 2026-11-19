@@ -329,3 +329,16 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .val-beds th:first-child, .val-beds td:first-child { text-align: left; }
 .val-beds tr.me td { font-weight: 800; color: var(--red-text); }
 .val-sec h4 { margin: 8px 0 2px; font-size: 0.95rem; }
+.val-cond button, .val-strats button { font-size: 0.9rem; }
+.val-cond { flex-wrap: wrap; }
+.val-strats button[aria-pressed=true] { background: var(--red); color: #fff; border-color: var(--red); }
+.val-to { align-self: center; font-weight: 700; padding: 0 6px; }
+.val-strat-line { font-size: 1.3rem; }
+.lad { display: flex; gap: 10px; margin: 6px 0; }
+.lad-col { flex: 1; min-width: 0; }
+.lad-col b { display: block; font-size: 0.85rem; margin-bottom: 4px; }
+.lad-col small { display: block; margin-top: 4px; font-weight: 700; }
+.lad-band { display: flex; justify-content: space-between; gap: 4px; padding: 6px 8px; margin: 3px 0; border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 0.8rem; border: 1px solid var(--line); }
+.lad-band.on { background: var(--navy); color: #fff; border-color: var(--navy); font-weight: 700; }
+.lad-col:last-child .lad-band.on { background: var(--red); border-color: var(--red); }
+.val-contact { margin: 8px 0; }

@@ -50,8 +50,9 @@ const PDFX = (() => {
   }
 
   class Doc {
-    constructor() { this.pages = []; this.newPage(); }
-    newPage() { this.ops = []; this.pages.push(this.ops); this.y = H - M; }
+    constructor() { this.pages = []; this.links = []; this.newPage(); }
+    newPage() { this.ops = []; this.pages.push(this.ops); this.pageLinks = []; this.links.push(this.pageLinks); this.y = H - M; }
+    link(x, y, w, h, url) { if (url) this.pageLinks.push({ x, y, w, h, url }); }
     col(c, stroke) { this.ops.push(`${c.map((v) => v.toFixed(3)).join(' ')} ${stroke ? 'RG' : 'rg'}`); }
     rect(x, y, w, h, c) { this.col(c); this.ops.push(`${x.toFixed(2)} ${y.toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`); }
     line(x1, y1, x2, y2, c, lw = 0.6) { this.col(c, true); this.ops.push(`${lw} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`); }
@@ -85,11 +86,13 @@ const PDFX = (() => {
     const f2 = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
     const im = logo ? add(`<< /Type /XObject /Subtype /Image /Width ${logo.w} /Height ${logo.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logo.bin.length} >>\nstream\n${logo.bin}\nendstream`) : 0;
     const kids = [];
+    const esc = (u) => u.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
     doc.pages.forEach((ops, i) => {
+      const annots = (doc.links[i] || []).map((l) => add(`<< /Type /Annot /Subtype /Link /Rect [${l.x.toFixed(2)} ${l.y.toFixed(2)} ${(l.x + l.w).toFixed(2)} ${(l.y + l.h).toFixed(2)}] /Border [0 0 0] /A << /S /URI /URI (${esc(l.url)}) >> >>`));
       const f = footer(i + 1, doc.pages.length);
       const body = ops.concat(f).join('\n');
       const cs = add(`<< /Length ${body.length} >>\nstream\n${body}\nendstream`);
-      kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${cs} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${im ? ` /XObject << /Logo ${im} 0 R >>` : ''} >> >>`));
+      kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${cs} 0 R /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R >>${im ? ` /XObject << /Logo ${im} 0 R >>` : ''} >>${annots.length ? ` /Annots [${annots.map((a) => a + ' 0 R').join(' ')}]` : ''} >>`));
     });
     objs[cat - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
     objs[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map((k) => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
@@ -121,11 +124,86 @@ const PDFX = (() => {
       d.y = H - hh - 4 - 28;
     };
     const need = (h) => { if (d.y - h < FOOT) { d.newPage(); header(false); } };
+    function buttonRow(btns) {
+      const bh = 24, gap = 8;
+      let x = M;
+      need(bh + 10);
+      for (const b of btns) {
+        const bw = width(clean(b.label), 9.5, true) + 26;
+        if (x + bw > W - M) { x = M; d.y -= bh + gap; }
+        d.rect(x, d.y - bh, bw, bh, b.label.startsWith('Read') ? RED : NAVY);
+        d.text(x + bw / 2, d.y - bh + 8.5, b.label, 9.5, { bold: true, c: [1, 1, 1], align: 'center' });
+        d.link(x, d.y - bh, bw, bh, b.url);
+        x += bw + gap;
+      }
+      d.y -= bh + 20;
+    }
+    // Rightmove "who sees your home": each search band as a bar, lit if the price is inside it.
+    function ladderGraphic(L) {
+      const cols = L.showRaw ? [{ t: 'Priced at ' + money(L.raw), k: 'a' }, { t: L.label, k: 'b' }] : [{ t: L.label, k: 'b' }];
+      const cw = (W - 2 * M - (cols.length - 1) * 14) / cols.length, rh = 22;
+      const h = 22 + L.bands.length * (rh + 5) + 20;
+      need(h);
+      const top = d.y;
+      cols.forEach((c, ci) => {
+        const x = M + ci * (cw + 14);
+        d.text(x, top, c.t, 10, { bold: true, c: ci === cols.length - 1 ? RED : NAVY });
+        let y = top - 14;
+        let seen = 0;
+        for (const b of L.bands.slice().reverse()) {
+          const on = b[c.k];
+          if (on) seen++;
+          d.rect(x, y - rh, cw, rh, on ? (ci === cols.length - 1 ? RED : NAVY) : CARD);
+          d.text(x + 10, y - rh + 7.5, `Buyers searching ${money(b.min)} – ${money(b.max)}`, 8.5, { bold: on, c: on ? [1, 1, 1] : GREY });
+          d.text(x + cw - 10, y - rh + 7.5, on ? 'SEES IT' : 'misses it', 8, { bold: true, c: on ? [1, 1, 1] : GREY, align: 'right' });
+          y -= rh + 5;
+        }
+        d.text(x, y - 8, `Seen by ${seen} of ${L.bands.length} search bands`, 9, { bold: true, c: ci === cols.length - 1 ? RED : GREY });
+      });
+      d.y = top - h - 4;
+    }
+    const money = (n) => '£' + Math.round(n).toLocaleString('en-GB');
+    const kfmt = (n) => '£' + Math.round(n / 1000) + 'k';
+    // Simple vector charts in Griffin colours.
+    function chart(c) {
+      const ch = 150, cw = W - 2 * M, padL = 46, padB = 22, padT = 18;
+      need(ch + 16);
+      const top = d.y, x0 = M + padL, y0 = top - ch + padB, pw = cw - padL - 8, ph = ch - padB - padT;
+      d.text(M, top, c.title, 10, { bold: true, c: NAVY });
+      if (c.type === 'bars') {
+        const vals = c.items.map((i) => i.v).concat(c.ref ? [c.ref.v] : []);
+        const max = Math.max(...vals) * 1.12, min = 0;
+        const n = c.items.length, bw = Math.min(46, (pw / n) * 0.62);
+        d.line(x0, y0, x0 + pw, y0, LINE);
+        c.items.forEach((it, i) => {
+          const cx = x0 + (pw / n) * (i + 0.5), bh = ((it.v - min) / (max - min)) * ph;
+          d.rect(cx - bw / 2, y0, bw, bh, NAVY);
+          d.text(cx, y0 + bh + 3, '£' + it.v, 8, { bold: true, c: NAVY, align: 'center' });
+          d.text(cx, y0 - 11, it.label.length > 16 ? it.label.slice(0, 15) + '…' : it.label, 7, { c: GREY, align: 'center' });
+        });
+        if (c.ref) { const ry = y0 + ((c.ref.v - min) / (max - min)) * ph; d.line(x0, ry, x0 + pw, ry, RED, 1.4); d.text(W - M, top, 'Red line = ' + c.ref.label + ' per sq ft', 7.5, { bold: true, c: RED, align: 'right' }); }
+      } else {
+        const ts = c.pts.map((p) => new Date(p.t).getTime());
+        const ps = c.pts.map((p) => p.p).concat(c.line ? [c.line.v] : []);
+        const t0 = Math.min(...ts), t1 = Math.max(Date.now(), ...ts);
+        let p0 = Math.min(...ps) * 0.9, p1 = Math.max(...ps) * 1.06;
+        const X = (t) => x0 + ((t - t0) / (t1 - t0 || 1)) * pw, Y = (p) => y0 + ((p - p0) / (p1 - p0 || 1)) * ph;
+        d.line(x0, y0, x0 + pw, y0, LINE); d.line(x0, y0, x0, y0 + ph, LINE);
+        for (let k = 0; k <= 3; k++) { const v = p0 + ((p1 - p0) * k) / 3; d.text(x0 - 5, Y(v) - 3, kfmt(v), 7, { c: GREY, align: 'right' }); if (k) d.line(x0, Y(v), x0 + pw, Y(v), CARD, 0.4); }
+        const y0yr = new Date(t0).getFullYear(), y1yr = new Date(t1).getFullYear();
+        for (let yr = y0yr; yr <= y1yr; yr += Math.max(1, Math.ceil((y1yr - y0yr) / 6))) { const t = new Date(yr + '-06-30').getTime(); if (t >= t0 && t <= t1) d.text(X(t), y0 - 11, String(yr), 7, { c: GREY, align: 'center' }); }
+        if (c.line) { const ly = Y(c.line.v); d.line(x0, ly, x0 + pw, ly, RED, 1.2); d.text(x0 + pw, ly + 3, `${c.line.label} ${money(c.line.v)}`, 7.5, { bold: true, c: RED, align: 'right' }); }
+        for (const p of c.pts) { const s = p.me ? 7 : 4.5; d.rect(X(new Date(p.t).getTime()) - s / 2, Y(p.p) - s / 2, s, s, p.me ? RED : NAVY); }
+        if (c.pts.some((p) => p.me)) d.text(W - M, top, 'Red = this home   Navy = other sales on the street', 7.5, { c: GREY, align: 'right' });
+      }
+      d.y = top - ch - 14;
+    }
     header(true);
 
     d.text(M, d.y, data.address, 22, { bold: true, c: NAVY }); d.y -= 18;
     d.text(M, d.y, data.sub, 11, { c: GREY }); d.y -= 15;
     d.text(M, d.y, `Prepared by ${data.from}`, 10, { c: GREY }); d.y -= 22;
+    if (data.buttons && data.buttons.length) buttonRow(data.buttons);
 
     if (data.note) {
       const ls = wrap(data.note, 10.5, false, W - 2 * M - 24);
@@ -156,6 +234,8 @@ const PDFX = (() => {
       need(48);
       d.text(M, d.y, s.title, 13, { bold: true, c: NAVY }); d.y -= 6;
       d.rect(M, d.y, 36, 2.5, RED); d.y -= 16;
+      if (s.ladder) ladderGraphic(s.ladder);
+      if (s.chart) chart(s.chart);
       if (s.table) {
         const cols = s.table.cols, rows = s.table.rows;
         const xs = []; let x = M; for (const c of cols) { xs.push(x); x += c.w * (W - 2 * M); }
@@ -165,6 +245,7 @@ const PDFX = (() => {
         for (const r of rows) {
           need(17);
           if (r.hi) d.rect(M, d.y - 5, W - 2 * M, 16, [1, 0.94, 0.94]);
+          if (r.link) d.link(M, d.y - 5, W - 2 * M, 16, r.link);
           r.cells.forEach((v, i) => {
             const c = cols[i]; let t = clean(v), sz = 9.5;
             while (width(t, sz, i === 0) > c.w * (W - 2 * M) - 8 && t.length > 4) t = t.slice(0, -2) + '…';
@@ -187,6 +268,7 @@ const PDFX = (() => {
       d.y -= 14;
     }
 
+    if (data.buttons && data.buttons.length) { need(70); d.text(M, d.y, 'Any questions? Get in touch', 13, { bold: true, c: NAVY }); d.y -= 6; d.rect(M, d.y, 36, 2.5, RED); d.y -= 14; buttonRow(data.buttons); }
     const footLines = wrap(data.disclaimer, 7, false, W - 2 * M - 140);
     const footer = (p, n) => {
       const f = new Doc(); f.ops = [];
