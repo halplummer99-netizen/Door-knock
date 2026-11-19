@@ -419,12 +419,14 @@ async function renderValue() {
     <label for="v-q">House number and street, or postcode</label>
     <input type="text" id="v-q" autocomplete="off" enterkeyhint="search" placeholder="e.g. 42 Silvertown Avenue" value="${esc(VAL.query)}">
     <ul class="stops val-results" id="v-res"></ul>
-    <p class="meta">${num0(P.homes.length)} homes · sales to ${esc(prettyDate(P.landRegistryLatest))}${P.spriftDate ? ` · Sprift ${esc(prettyDate(P.spriftDate))}` : ''} · pack built ${esc(prettyDate(P.built))}</p>
+    <p class="meta">${num0(P.homes.length)} homes · sales to ${esc(prettyDate(P.landRegistryLatest))}${P.spriftDate ? ` · Sprift ${esc(prettyDate(P.spriftDate))}` : ''} · pack built ${esc(prettyDate(P.built))}<br>App version <span id="v-appver">…</span></p>
     ${age > 10 ? `<div class="notice warn">This pack is ${age} days old. Load this week's one from the Door Knock list folder.</div>` : ''}
     <div id="v-sentbox"></div>
     <div class="stack"><button class="btn small" id="v-load" type="button">Load a newer area pack</button></div>
     <input type="file" id="v-file" accept=".json,application/json,text/plain" hidden>`;
   wirePackLoad();
+  // The app version is the name of the offline copy the phone is running (dk-v18 = has the PDF and everything since).
+  if (window.caches) caches.keys().then((k) => { const v = k.filter((x) => /^dk-v\d+$/.test(x)).sort((x, y) => +x.slice(4) - +y.slice(4)).pop(); const el = $('#v-appver'); if (el) el.textContent = v || 'not installed'; });
   sentListHtml().then((h) => { if (h && $('#v-sentbox')) { $('#v-sentbox').innerHTML = h; wireSentList(); } });
   const show = () => {
     VAL.query = $('#v-q').value;
