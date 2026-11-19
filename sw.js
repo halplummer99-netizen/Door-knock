@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v10';
+const VERSION = 'dk-v11';
 const SHELL = [
   './',
   './index.html',
@@ -24,7 +24,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('dk-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -32,6 +32,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return; // Google APIs go straight to the network
+  if (url.pathname.includes('/fee-calculator/')) return; // separate app with its own service worker
 
   if (e.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
     e.respondWith(handleShare(e.request));
