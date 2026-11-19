@@ -142,10 +142,10 @@ then tap **⋮ → Add to Home screen → Install**. It gets its own **Fee Calc*
 ### Sharing it with colleagues
 
 - Tap **Send to a colleague** at the bottom of the app to share the link by WhatsApp, email and so on.
-- Each lister gets their own link with `?name=` and their first name on the end:
+- Each lister gets their own link with `?name=` and their name on the end (use `+` for the space):
   - Hal: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Hal`
-  - Ian: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Ian`
-  - Simon: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Simon`
+  - Ian Divers: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Ian+Divers`
+  - Simon Windham: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Simon+Windham`
 
-  The app then says "Hi Ian" (and so on) and remembers it, including after they install it. Anyone can also type or change their name under **Your name**.
+  The app then shows their name (e.g. "Ian Divers") large in the banner and remembers it, including after they install it. Anyone can also type or change their name under **Your name**.
 - Nothing anyone types is sent anywhere: prices, fees and names stay on their own phone.

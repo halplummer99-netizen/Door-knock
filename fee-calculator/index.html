@@ -201,7 +201,7 @@
 
     function render() {
       const name = cleanName($('name').value);
-      $('hello').textContent = name ? `Hi ${name}` : '';
+      $('hello').textContent = name;
       $('hello').hidden = !name;
 
       $('type-pct').setAttribute('aria-pressed', state.type === 'pct');

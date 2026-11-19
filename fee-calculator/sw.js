@@ -1,6 +1,6 @@
 // Fee Calculator service worker: lets the app open with no signal.
 // Bump VERSION whenever the files change so phones pick up the new copy.
-const VERSION = 'fee-v7';
+const VERSION = 'fee-v8';
 const SHELL = [
   './',
   './index.html',
