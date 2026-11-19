@@ -37,7 +37,11 @@
     header {
       background: var(--navy); color: var(--on-brand); border-bottom: 4px solid var(--red);
       padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top));
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    header .who {
+      flex: 0 0 100%; margin: 2px 0 0; font-size: 2rem; font-weight: 800; line-height: 1.15;
+      overflow-wrap: anywhere;
     }
     header img { display: block; height: 48px; width: auto; max-width: 60%; object-fit: contain; }
     header h1 {
@@ -85,7 +89,6 @@
     .vatrow { display: flex; align-items: center; gap: 10px; color: var(--muted); }
     .vatrow .input-wrap { flex: 0 0 110px; padding: 0 8px; }
     .vatrow input[type=text] { font-size: 1.1rem; padding: 8px 4px; }
-    .hello { font-size: 1.3rem; font-weight: 700; color: var(--navy-text); margin: 0 0 14px; }
     .vatrow .name-wrap { flex: 1; }
     .clear.share { border-color: var(--red); color: var(--red-text); }
     .clear {
@@ -98,9 +101,9 @@
   <header>
     <img src="icons/griffin-logo.png" alt="Griffin, the property people" width="619" height="151">
     <h1>Fee<br>Calculator</h1>
+    <p class="who" id="hello" hidden></p>
   </header>
   <main>
-    <p class="hello" id="hello" hidden></p>
     <div class="block">
       <label class="field" for="price">Price</label>
       <div class="input-wrap"><span>£</span><input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="Type the price" enterkeyhint="next"></div>
@@ -123,6 +126,7 @@
         <button type="button" data-fee="1.2">1.2%</button>
         <button type="button" data-fee="1.25">1.25%</button>
         <button type="button" data-fee="1.5">1.5%</button>
+        <button type="button" data-fee="2">2%</button>
       </div>
     </div>
 

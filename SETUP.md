@@ -134,7 +134,7 @@ the fee before VAT, the VAT, and the fee including VAT.
 **Install it:** on your Android phone, open `https://YOUR-NAME.github.io/door-knock/fee-calculator/` in **Chrome**,
 then tap **⋮ → Add to Home screen → Install**. It gets its own **Fee Calc** icon and works with no signal.
 
-- **Fee** is a percentage of the price by default (tap 1.2%, 1.25% or 1.5%, or type any other fee). Tap **£** to type a fixed fee instead.
+- **Fee** is a percentage of the price by default (tap 1.2%, 1.25%, 1.5% or 2%, or type any other fee). Tap **£** to type a fixed fee instead.
 - **The fee I typed is: + VAT / inc VAT** says whether the fee you typed already includes VAT.
 - The price box takes `350000`, `350,000` or `350k`. Your fee and VAT rate are remembered.
 - To update it later, change `VERSION` at the top of `fee-calculator/sw.js` (e.g. `fee-v1` → `fee-v2`).
