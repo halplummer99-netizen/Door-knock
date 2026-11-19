@@ -123,3 +123,18 @@ On any door card, tap **Send them a Christmas card**. Everyone you've ticked, ac
 
 Upload the changed files to the GitHub repository again and change `VERSION` at the top of `sw.js`
 (e.g. `dk-v1` → `dk-v2`). The phone picks up the new version the next time the app is opened twice.
+
+---
+
+## Fee Calculator (second app)
+
+The `fee-calculator` folder is a separate little app on the same site. Put in the price and the fee, and it shows
+the fee before VAT, the VAT, and the fee including VAT.
+
+**Install it:** on your Android phone, open `https://YOUR-NAME.github.io/door-knock/fee-calculator/` in **Chrome**,
+then tap **⋮ → Add to Home screen → Install**. It gets its own **Fee Calc** icon and works with no signal.
+
+- **Fee** is a percentage of the price by default (tap 1%, 1.25%, 1.5% or 2% for a quick pick). Tap **£** to type a fixed fee instead.
+- **The fee I typed is: + VAT / inc VAT** says whether the fee you typed already includes VAT.
+- The price box takes `350000`, `350,000` or `350k`. Your fee and VAT rate are remembered.
+- To update it later, change `VERSION` at the top of `fee-calculator/sw.js` (e.g. `fee-v1` → `fee-v2`).

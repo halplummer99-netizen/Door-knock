@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <script>
+    // Without a trailing slash the browser looks for styles and scripts in the wrong folder; add it.
+    if (!/\/$|\.html?$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0040a8">
+  <meta name="description" content="Put in the price and the fee; see the fee before and including VAT.">
+  <title>Fee Calculator</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #0a0a0a; --muted: #4a4a4a; --line: #b8b8b8;
+      --card: #f2f3f5; --pri: #0040a8; --pri-fg: #ffffff; --accent: #0a6b2a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000; --fg: #ffffff; --muted: #c8c8c8; --line: #5c5c5c;
+        --card: #161616; --pri: #3d8bff; --pri-fg: #000000; --accent: #2fbf5b;
+      }
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { font-size: 18px; -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.35; -webkit-tap-highlight-color: transparent;
+    }
+    header {
+      background: var(--pri); color: var(--pri-fg);
+      padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
+      font-weight: 700; font-size: 1.15rem;
+    }
+    main { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+    label.field { display: block; font-weight: 600; margin: 0 0 6px; }
+    .row { display: flex; gap: 8px; align-items: stretch; }
+    .row .seg { flex: 0 0 auto; }
+    .row .seg button { padding: 10px 16px; font-size: 1.15rem; }
+    .input-wrap {
+      flex: 1; min-width: 0; display: flex; align-items: center;
+      border: 2px solid var(--line); border-radius: 12px; background: var(--bg);
+      padding: 0 12px;
+    }
+    .input-wrap:focus-within { border-color: var(--pri); }
+    .input-wrap span { font-size: 1.4rem; color: var(--muted); }
+    input[type=text] {
+      flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg);
+      font: inherit; font-size: 1.6rem; font-weight: 600; padding: 12px 6px;
+    }
+    .block { margin-bottom: 18px; }
+    .seg { display: flex; border: 2px solid var(--pri); border-radius: 12px; overflow: hidden; }
+    .seg button {
+      flex: 1; border: 0; background: var(--bg); color: var(--pri);
+      font: inherit; font-weight: 700; padding: 10px 14px; min-height: 48px;
+    }
+    .seg button[aria-pressed=true] { background: var(--pri); color: var(--pri-fg); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .chips button {
+      border: 1px solid var(--line); background: var(--card); color: var(--fg);
+      border-radius: 999px; font: inherit; padding: 6px 14px; min-height: 40px;
+    }
+    .results { background: var(--card); border-radius: 16px; padding: 16px; margin: 22px 0 18px; }
+    .res { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; }
+    .res + .res { border-top: 1px solid var(--line); }
+    .res .k { color: var(--muted); }
+    .res .v { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+    .res.big .k { color: var(--fg); font-weight: 600; }
+    .res.big .v { font-size: 2rem; font-weight: 800; }
+    .res.inc .v { color: var(--accent); }
+    .note { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+    .vatrow { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+    .vatrow .input-wrap { flex: 0 0 110px; padding: 0 8px; }
+    .vatrow input[type=text] { font-size: 1.1rem; padding: 8px 4px; }
+    .clear {
+      width: 100%; border: 2px solid var(--line); background: var(--bg); color: var(--fg);
+      border-radius: 12px; font: inherit; font-weight: 600; padding: 12px; min-height: 48px; margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>Fee Calculator</header>
+  <main>
+    <div class="block">
+      <label class="field" for="price">Price</label>
+      <div class="input-wrap"><span>£</span><input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="350,000" enterkeyhint="next"></div>
+    </div>
+
+    <div class="block">
+      <label class="field" for="fee">Fee</label>
+      <div class="row">
+        <div class="input-wrap">
+          <span id="fee-pre">£</span>
+          <input id="fee" type="text" inputmode="decimal" autocomplete="off" placeholder="1.2" enterkeyhint="done">
+          <span id="fee-post">%</span>
+        </div>
+        <div class="seg" role="group" aria-label="Fee type">
+          <button type="button" id="type-pct" aria-pressed="true">%</button>
+          <button type="button" id="type-gbp" aria-pressed="false">£</button>
+        </div>
+      </div>
+      <div class="chips" id="chips">
+        <button type="button" data-fee="1">1%</button>
+        <button type="button" data-fee="1.25">1.25%</button>
+        <button type="button" data-fee="1.5">1.5%</button>
+        <button type="button" data-fee="2">2%</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <label class="field">The fee I typed is</label>
+      <div class="seg" role="group" aria-label="Fee VAT basis">
+        <button type="button" id="basis-ex" aria-pressed="true">+ VAT</button>
+        <button type="button" id="basis-inc" aria-pressed="false">inc VAT</button>
+      </div>
+    </div>
+
+    <section class="results" aria-live="polite">
+      <div class="res big"><span class="k">Fee before VAT</span><span class="v" id="r-ex">£0.00</span></div>
+      <div class="res"><span class="k" id="r-vat-label">VAT (20%)</span><span class="v" id="r-vat">£0.00</span></div>
+      <div class="res big inc"><span class="k">Fee inc VAT</span><span class="v" id="r-inc">£0.00</span></div>
+      <p class="note" id="r-note"></p>
+    </section>
+
+    <div class="block vatrow">
+      <label for="vat">VAT rate</label>
+      <div class="input-wrap"><input id="vat" type="text" inputmode="decimal" autocomplete="off" value="20"><span>%</span></div>
+    </div>
+
+    <button type="button" class="clear" id="clear">Clear price</button>
+  </main>
+
+  <script>
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
+    const KEY = 'feecalc-v1';
+
+    const saved = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } })();
+    const state = {
+      type: saved.type === 'gbp' ? 'gbp' : 'pct',     // fee as % of price, or a fixed £ amount
+      basis: saved.basis === 'inc' ? 'inc' : 'ex',     // fee typed before VAT or including VAT
+    };
+    $('fee').value = saved.fee || '';
+    $('vat').value = saved.vat != null ? saved.vat : '20';
+
+    // Accepts "350,000", "£350k", "1.2%", "1.5m".
+    function num(str) {
+      let s = String(str).trim().toLowerCase().replace(/[£,%\s]/g, '');
+      let mult = 1;
+      if (s.endsWith('k')) { mult = 1e3; s = s.slice(0, -1); }
+      else if (s.endsWith('m')) { mult = 1e6; s = s.slice(0, -1); }
+      if (s === '' || !/^\d*\.?\d*$/.test(s) || s === '.') return null;
+      return parseFloat(s) * mult;
+    }
+
+    function save() {
+      try {
+        localStorage.setItem(KEY, JSON.stringify({ type: state.type, basis: state.basis, fee: $('fee').value, vat: $('vat').value }));
+      } catch {}
+    }
+
+    function render() {
+      $('type-pct').setAttribute('aria-pressed', state.type === 'pct');
+      $('type-gbp').setAttribute('aria-pressed', state.type === 'gbp');
+      $('basis-ex').setAttribute('aria-pressed', state.basis === 'ex');
+      $('basis-inc').setAttribute('aria-pressed', state.basis === 'inc');
+      $('fee-pre').hidden = state.type !== 'gbp';
+      $('fee-post').hidden = state.type !== 'pct';
+      $('fee').placeholder = state.type === 'pct' ? '1.2' : '4,500';
+      $('chips').hidden = state.type !== 'pct';
+
+      const price = num($('price').value);
+      const fee = num($('fee').value);
+      let vatRate = num($('vat').value);
+      if (vatRate == null) vatRate = 0;
+      $('r-vat-label').textContent = `VAT (${+vatRate.toFixed(3)}%)`;
+
+      let typed = null;   // the fee amount in £, on whatever basis was typed
+      if (fee != null) {
+        if (state.type === 'gbp') typed = fee;
+        else if (price != null) typed = price * fee / 100;
+      }
+
+      let ex = 0, inc = 0;
+      if (typed != null) {
+        if (state.basis === 'ex') { ex = typed; inc = typed * (1 + vatRate / 100); }
+        else { inc = typed; ex = typed / (1 + vatRate / 100); }
+      }
+      // Round to pennies; VAT is the difference so the three lines always add up.
+      ex = Math.round(ex * 100) / 100;
+      inc = Math.round(inc * 100) / 100;
+      $('r-ex').textContent = gbp.format(ex);
+      $('r-vat').textContent = gbp.format(inc - ex);
+      $('r-inc').textContent = gbp.format(inc);
+
+      let note = '';
+      if (price != null && price > 0 && typed != null) {
+        const pex = (ex / price) * 100, pinc = (inc / price) * 100;
+        note = `On ${gbp.format(price)}: ${+pex.toFixed(3)}% + VAT, or ${+pinc.toFixed(3)}% inc VAT.`;
+      } else if (state.type === 'pct' && fee != null && price == null) {
+        note = 'Put in the price to see the fee.';
+      }
+      $('r-note').textContent = note;
+    }
+
+    function update() { save(); render(); }
+
+    ['price', 'fee', 'vat'].forEach((id) => $(id).addEventListener('input', update));
+    $('price').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('fee').focus(); });
+    $('fee').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('fee').blur(); });
+    $('type-pct').onclick = () => { if (state.type !== 'pct') { state.type = 'pct'; $('fee').value = ''; } update(); };
+    $('type-gbp').onclick = () => { if (state.type !== 'gbp') { state.type = 'gbp'; $('fee').value = ''; } update(); };
+    $('basis-ex').onclick = () => { state.basis = 'ex'; update(); };
+    $('basis-inc').onclick = () => { state.basis = 'inc'; update(); };
+    $('chips').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-fee]');
+      if (b) { $('fee').value = b.dataset.fee; update(); }
+    });
+    $('clear').onclick = () => { $('price').value = ''; render(); $('price').focus(); };
+
+    // Show price with thousands separators once you leave the box.
+    $('price').addEventListener('blur', () => {
+      const p = num($('price').value);
+      if (p != null) $('price').value = p.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+    });
+
+    render();
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
+</body>
+</html>
