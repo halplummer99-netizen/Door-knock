@@ -7,21 +7,23 @@
     if (!/\/$|\.html?$/.test(location.pathname)) location.replace(location.pathname + '/' + location.search + location.hash);
   </script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0040a8">
+  <meta name="theme-color" content="#191933">
   <meta name="description" content="Put in the price and the fee; see the fee before and including VAT.">
   <title>Fee Calculator</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <style>
+    /* Griffin colours: navy #191933 and red #b11f29 */
     :root {
-      --bg: #ffffff; --fg: #0a0a0a; --muted: #4a4a4a; --line: #b8b8b8;
-      --card: #f2f3f5; --pri: #0040a8; --pri-fg: #ffffff; --accent: #0a6b2a;
+      --bg: #ffffff; --fg: #191933; --muted: #4a4a5e; --line: #b8b8c4;
+      --card: #f1f1f5; --navy: #191933; --red: #b11f29; --on-brand: #ffffff;
+      --red-text: #b11f29; --navy-text: #191933;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #000000; --fg: #ffffff; --muted: #c8c8c8; --line: #5c5c5c;
-        --card: #161616; --pri: #3d8bff; --pri-fg: #000000; --accent: #2fbf5b;
+        --bg: #0d0d1c; --fg: #ffffff; --muted: #c4c4d4; --line: #4a4a66;
+        --card: #191933; --red-text: #ff6b74; --navy-text: #ffffff;
       }
     }
     * { box-sizing: border-box; }
@@ -33,7 +35,7 @@
       line-height: 1.35; -webkit-tap-highlight-color: transparent;
     }
     header {
-      background: var(--pri); color: var(--pri-fg);
+      background: var(--navy); color: var(--on-brand); border-bottom: 4px solid var(--red);
       padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top));
       font-weight: 700; font-size: 1.15rem;
     }
@@ -47,32 +49,32 @@
       border: 2px solid var(--line); border-radius: 12px; background: var(--bg);
       padding: 0 12px;
     }
-    .input-wrap:focus-within { border-color: var(--pri); }
+    .input-wrap:focus-within { border-color: var(--red-text); }
     .input-wrap span { font-size: 1.4rem; color: var(--muted); }
     input[type=text] {
       flex: 1; min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg);
       font: inherit; font-size: 1.6rem; font-weight: 600; padding: 12px 6px;
     }
     .block { margin-bottom: 18px; }
-    .seg { display: flex; border: 2px solid var(--pri); border-radius: 12px; overflow: hidden; }
+    .seg { display: flex; border: 2px solid var(--red); border-radius: 12px; overflow: hidden; }
     .seg button {
-      flex: 1; border: 0; background: var(--bg); color: var(--pri);
+      flex: 1; border: 0; background: var(--bg); color: var(--red-text);
       font: inherit; font-weight: 700; padding: 10px 14px; min-height: 48px;
     }
-    .seg button[aria-pressed=true] { background: var(--pri); color: var(--pri-fg); }
+    .seg button[aria-pressed=true] { background: var(--red); color: var(--on-brand); }
     .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .chips button {
       border: 1px solid var(--line); background: var(--card); color: var(--fg);
       border-radius: 999px; font: inherit; padding: 6px 14px; min-height: 40px;
     }
-    .results { background: var(--card); border-radius: 16px; padding: 16px; margin: 22px 0 18px; }
+    .results { background: var(--card); border-left: 8px solid var(--red); border-radius: 16px; padding: 16px; margin: 22px 0 18px; }
     .res { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; }
     .res + .res { border-top: 1px solid var(--line); }
     .res .k { color: var(--muted); }
     .res .v { font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
     .res.big .k { color: var(--fg); font-weight: 600; }
-    .res.big .v { font-size: 2rem; font-weight: 800; }
-    .res.inc .v { color: var(--accent); }
+    .res.big .v { font-size: 2rem; font-weight: 800; color: var(--navy-text); }
+    .res.inc .v { color: var(--red-text); }
     .note { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
     .vatrow { display: flex; align-items: center; gap: 10px; color: var(--muted); }
     .vatrow .input-wrap { flex: 0 0 110px; padding: 0 8px; }
