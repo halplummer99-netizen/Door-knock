@@ -85,6 +85,9 @@
     .vatrow { display: flex; align-items: center; gap: 10px; color: var(--muted); }
     .vatrow .input-wrap { flex: 0 0 110px; padding: 0 8px; }
     .vatrow input[type=text] { font-size: 1.1rem; padding: 8px 4px; }
+    .hello { font-size: 1.3rem; font-weight: 700; color: var(--navy-text); margin: 0 0 14px; }
+    .vatrow .name-wrap { flex: 1; }
+    .clear.share { border-color: var(--red); color: var(--red-text); }
     .clear {
       width: 100%; border: 2px solid var(--line); background: var(--bg); color: var(--fg);
       border-radius: 12px; font: inherit; font-weight: 600; padding: 12px; min-height: 48px; margin-top: 8px;
@@ -97,6 +100,7 @@
     <h1>Fee<br>Calculator</h1>
   </header>
   <main>
+    <p class="hello" id="hello" hidden></p>
     <div class="block">
       <label class="field" for="price">Price</label>
       <div class="input-wrap"><span>£</span><input id="price" type="text" inputmode="decimal" autocomplete="off" placeholder="Type the price" enterkeyhint="next"></div>
@@ -116,10 +120,9 @@
         </div>
       </div>
       <div class="chips" id="chips">
-        <button type="button" data-fee="1">1%</button>
+        <button type="button" data-fee="1.2">1.2%</button>
         <button type="button" data-fee="1.25">1.25%</button>
         <button type="button" data-fee="1.5">1.5%</button>
-        <button type="button" data-fee="2">2%</button>
       </div>
     </div>
 
@@ -143,7 +146,14 @@
       <div class="input-wrap"><input id="vat" type="text" inputmode="decimal" autocomplete="off" value="20"><span>%</span></div>
     </div>
 
+    <div class="block vatrow">
+      <label for="name">Your name</label>
+      <div class="input-wrap name-wrap"><input id="name" type="text" autocomplete="given-name" maxlength="30" placeholder="Optional" enterkeyhint="done"></div>
+    </div>
+
     <button type="button" class="clear" id="clear">Clear price</button>
+    <button type="button" class="clear share" id="share">Send to a colleague</button>
+    <p class="note" id="share-note" hidden></p>
   </main>
 
   <script>
@@ -158,6 +168,15 @@
       basis: saved.basis === 'inc' ? 'inc' : 'ex',     // fee typed before VAT or including VAT
     };
     $('fee').value = saved.fee || '';
+
+    // Personal link: .../fee-calculator/?name=Sarah sets the name once, then it's remembered.
+    const params = new URLSearchParams(location.search);
+    const cleanName = (n) => String(n || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 30);
+    if (params.has('name')) {
+      saved.name = cleanName(params.get('name'));
+      history.replaceState(null, '', location.pathname);
+    }
+    $('name').value = saved.name || '';
     $('vat').value = saved.vat != null ? saved.vat : '20';
 
     // Accepts "350,000", "£350k", "1.2%", "1.5m".
@@ -172,11 +191,15 @@
 
     function save() {
       try {
-        localStorage.setItem(KEY, JSON.stringify({ type: state.type, basis: state.basis, fee: $('fee').value, vat: $('vat').value }));
+        localStorage.setItem(KEY, JSON.stringify({ type: state.type, basis: state.basis, fee: $('fee').value, vat: $('vat').value, name: cleanName($('name').value) }));
       } catch {}
     }
 
     function render() {
+      const name = cleanName($('name').value);
+      $('hello').textContent = name ? `Hi ${name}` : '';
+      $('hello').hidden = !name;
+
       $('type-pct').setAttribute('aria-pressed', state.type === 'pct');
       $('type-gbp').setAttribute('aria-pressed', state.type === 'gbp');
       $('basis-ex').setAttribute('aria-pressed', state.basis === 'ex');
@@ -222,7 +245,7 @@
 
     function update() { save(); render(); }
 
-    ['price', 'fee', 'vat'].forEach((id) => $(id).addEventListener('input', update));
+    ['price', 'fee', 'vat', 'name'].forEach((id) => $(id).addEventListener('input', update));
     $('price').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('fee').focus(); });
     $('fee').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('fee').blur(); });
     $('type-pct').onclick = () => { if (state.type !== 'pct') { state.type = 'pct'; $('fee').value = ''; } update(); };
@@ -233,6 +256,23 @@
       const b = e.target.closest('button[data-fee]');
       if (b) { $('fee').value = b.dataset.fee; update(); }
     });
+    // Share the plain link (no name), so each colleague puts in their own.
+    $('share').onclick = async () => {
+      const url = location.origin + location.pathname;
+      const note = $('share-note');
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Fee Calculator', text: 'Griffin fee calculator. Open in Chrome, then tap \u22ee > Add to Home screen > Install.', url });
+          return;
+        }
+        await navigator.clipboard.writeText(url);
+        note.textContent = 'Link copied: ' + url;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+        note.textContent = 'Send this link: ' + url;
+      }
+      note.hidden = false;
+    };
     $('clear').onclick = () => { $('price').value = ''; render(); $('price').focus(); };
 
     // Show price with thousands separators once you leave the box.

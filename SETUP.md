@@ -134,7 +134,18 @@ the fee before VAT, the VAT, and the fee including VAT.
 **Install it:** on your Android phone, open `https://YOUR-NAME.github.io/door-knock/fee-calculator/` in **Chrome**,
 then tap **⋮ → Add to Home screen → Install**. It gets its own **Fee Calc** icon and works with no signal.
 
-- **Fee** is a percentage of the price by default (tap 1%, 1.25%, 1.5% or 2% for a quick pick). Tap **£** to type a fixed fee instead.
+- **Fee** is a percentage of the price by default (tap 1.2%, 1.25% or 1.5%, or type any other fee). Tap **£** to type a fixed fee instead.
 - **The fee I typed is: + VAT / inc VAT** says whether the fee you typed already includes VAT.
 - The price box takes `350000`, `350,000` or `350k`. Your fee and VAT rate are remembered.
 - To update it later, change `VERSION` at the top of `fee-calculator/sw.js` (e.g. `fee-v1` → `fee-v2`).
+
+### Sharing it with colleagues
+
+- Tap **Send to a colleague** at the bottom of the app to share the link by WhatsApp, email and so on.
+- Each lister gets their own link with `?name=` and their first name on the end:
+  - Hal: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Hal`
+  - Ian: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Ian`
+  - Simon: `https://halplummer99-netizen.github.io/Door-knock/fee-calculator/?name=Simon`
+
+  The app then says "Hi Ian" (and so on) and remembers it, including after they install it. Anyone can also type or change their name under **Your name**.
+- Nothing anyone types is sent anywhere: prices, fees and names stay on their own phone.
