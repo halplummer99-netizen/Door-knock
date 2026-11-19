@@ -7,14 +7,21 @@
    so it works with no signal. Loaded before app.js; uses its helpers ($, esc, DB, S, toast, go).
    ============================================================ */
 
-const VAL = { pack: null, homes: null, home: null, query: '', space: null, shareTicks: null };
+const VAL = { pack: null, homes: null, home: null, query: '', adds: [], whole: '', unit: 'm2', shareTicks: null };
 const SQ_M = 10.764;
 const YEAR_MS = 365.25 * 86400000;
 // What extra space is worth compared with a proper, signed-off extension (Hal can change these).
+// Starting points for what each kind of addition is worth, as a share of a signed-off extension's
+// rate per sq ft. The lister can override any figure before it goes in the draft.
 const SPACE_KINDS = [
-  { k: 'ext', label: 'Extension or extra room (signed off)', f: 1 },
-  { k: 'cons', label: 'Conservatory', f: 0.5 },
-  { k: 'loft', label: 'Loft or garage conversion, no sign-off', f: 0.5 }
+  { k: 'ext1', label: 'Single-storey extension', f: 1 },
+  { k: 'ext2', label: 'Two-storey extension (both floors)', f: 1, note: 'If it adds a bedroom, buyers may pay more: use Change amount.' },
+  { k: 'loft', label: 'Loft conversion, signed off', f: 0.9 },
+  { k: 'orangery', label: 'Orangery (solid roof, heated)', f: 0.75 },
+  { k: 'garage', label: 'Garage conversion, signed off', f: 0.7 },
+  { k: 'cons', label: 'Conservatory (glass or plastic roof)', f: 0.5 },
+  { k: 'nosign', label: 'Loft or garage conversion, no sign-off', f: 0.4 },
+  { k: 'outb', label: 'Garden room or outbuilding', f: 0.3 }
 ];
 const AGE_BANDS = { A: 'before 1900', B: '1900–1929', C: '1930–1949', D: '1950–1966', E: '1967–1975', F: '1976–1982', G: '1983–1990', H: '1991–1995', I: '1996–2002', J: '2003–2006', K: '2007–2011', L: '2012–2021', M: '2022 or later' };
 const TYPE_WORD = { detached: 'detached', semi: 'semi-detached', terraced: 'terraced', flat: 'flat or maisonette', other: 'other' };
@@ -254,10 +261,13 @@ function buildSections(sub) {
     secs.push({ id: 'range', title: 'What the evidence says', html: `<p class="val-big">${esc(line)}</p><p class="hint">${esc(rng.basis)}. A starting point before condition, layout, garden and parking.</p>${rng.hi > rng.lo * 1.2 ? '<div class="notice warn">Wide range: the sales here are mixed, so lean on your own judgement and the closest comparables.</div>' : ''}`, text: `Based on the evidence above: ${line}, before condition, layout, garden and parking.`, on: true });
   }
 
-  // 6. Extra space (from the laser)
-  const sp = VAL.space;
-  if (sp && sp.added) {
-    secs.push({ id: 'space', title: 'Extra space', html: `<p>${esc(sp.line)}</p>`, text: sp.line, on: true });
+  // 6. Extra space the lister measured and agreed
+  const ag = agreedItems();
+  if (ag.length) {
+    const tot = ag.reduce((t, x) => t + x.fig, 0);
+    const lines = ag.map((x) => `${x.kind.label}: ${num0(x.sq)} sq ft (${(x.sq / SQ_M).toFixed(1)} m²) adds about ${money0(x.fig)}`);
+    const withIt = rng ? `With it, the evidence points to ${money0(rng.lo + tot)} – ${money0(rng.hi + tot)}.` : '';
+    secs.push({ id: 'space', title: 'Extra space measured', html: `<ul class="val-list">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>${withIt ? `<p><b>${esc(withIt)}</b></p>` : ''}`, text: lines.map((l) => '• ' + l).join('\n') + (withIt ? '\n' + withIt : ''), on: true });
   }
 
   // 7. On the market now (Sprift)
@@ -300,7 +310,7 @@ async function renderValue() {
       || (VAL.query.trim().length > 2 ? '<li><div class="stop-body"><small>No match. Try just the number and street, or the postcode.</small></div></li>' : '');
   };
   $('#v-q').addEventListener('input', show);
-  $('#v-res').onclick = (e) => { const li = e.target.closest('li[data-i]'); if (li) { VAL.home = VAL.homes[+li.dataset.i]; VAL.space = null; go('value'); } };
+  $('#v-res').onclick = (e) => { const li = e.target.closest('li[data-i]'); if (li) { VAL.home = VAL.homes[+li.dataset.i]; VAL.adds = []; VAL.whole = ''; go('value'); } };
   show();
   if (!VAL.query) $('#v-q').focus();
 }
@@ -317,77 +327,136 @@ function renderValueHome() {
   const sub = VAL.home;
   const { secs } = buildSections(sub);
   VAL.secs = secs;
-  const loc = (() => { const sf = streetFigure(sub); if (sf && sf.ok) return { v: sf.med, w: 'on ' + sub.st }; const c = comparables(sub).filter((x) => x.h.sq); if (c.length >= 3) return { v: quant(c.map(ppsf), 0.5), w: 'for the comparable sales' }; const nf = nearbyFigure(sub); return nf.n >= 5 ? { v: nf.med, w: 'nearby' } : null; })();
+  const loc = localRate(sub);
   const rate = extraSpaceRate(sub, loc && loc.v);
   VAL.rate = rate;
-  const sp = VAL.space || { mode: 'add', unit: 'm2', kind: 'ext', value: '' };
+  const C = ceilingInfo(sub);
+  const items = VAL.adds;
+  const kindOpts = (sel) => SPACE_KINDS.map((k) => `<option value="${k.k}" ${sel === k.k ? 'selected' : ''}>${esc(k.label)} (${Math.round(k.f * 100)}%)</option>`).join('');
+  const itemHtml = (it, n) => {
+    const s = suggestFor(it);
+    const fig = it.override != null ? it.override : s && s.added;
+    const done = it.status === 'agreed';
+    return `<div class="val-add${done ? ' agreed' : ''}" data-n="${n}">
+      <div class="row"><select data-f="kind" aria-label="What is it?">${kindOpts(it.kind)}</select><button type="button" class="icon-btn" data-a="del" aria-label="Remove">✕</button></div>
+      <div class="fee-input"><input type="text" data-f="size" inputmode="decimal" autocomplete="off" placeholder="${VAL.unit === 'm2' ? 'Size in m², e.g. 12.5' : 'Size in sq ft, e.g. 135'}" value="${esc(it.size)}"><span>${VAL.unit === 'm2' ? 'm²' : 'sq ft'}</span></div>
+      ${s ? `<p class="val-sugg">${done ? '✓ In the draft: ' : 'Suggested: '}<b>+ ${money0(fig)}</b>${it.override != null ? ' <small>(your figure)</small>' : ''}<br><small>${esc(s.why)}</small></p>` : ''}
+      ${s && !done && !it.editing ? `<div class="row"><button type="button" class="btn pri small" data-a="agree">Agree, add to draft</button><button type="button" class="btn small" data-a="change">Change amount</button></div>` : ''}
+      ${s && it.editing ? `<div class="fee-row"><div class="fee-input"><span>£</span><input type="text" data-f="override" inputmode="numeric" autocomplete="off" placeholder="Your figure" value="${it.override != null ? esc(it.override.toLocaleString('en-GB')) : ''}"></div><button type="button" class="btn pri small" data-a="useown">Use my figure</button></div>` : ''}
+      ${done ? `<div class="row"><button type="button" class="btn small" data-a="undo">Take out of draft</button><button type="button" class="btn small" data-a="change">Change amount</button></div>` : ''}
+    </div>`;
+  };
+  const total = agreedTotal();
+  const R = VAL.range;
   app.innerHTML = `
     <button class="btn small" id="v-back" type="button">← Search again</button>
     <h2>${esc(sub.a)}</h2>
     <p class="meta">${esc(sub.pc)}${sub.st ? ' · ' + esc(sub.st) : ''}</p>
     ${secs.map((s) => `<section class="val-sec" id="sec-${s.id}"><h3>${esc(s.title)}</h3>${s.html}</section>`).join('')}
     <section class="val-sec" id="sec-measure">
-      <h3>Measured extra space</h3>
-      ${rate.rate ? `<p class="hint">Extra space here adds about <b>£${Math.round(rate.rate)} per sq ft (£${num0(rate.rate * SQ_M)} per m²)</b>: ${Math.round(rate.used * 100)}% of the £${Math.round(rate.local)} per sq ft ${esc(loc.w)}. The average also pays for the land, kitchen and location, so each extra sq ft is worth less. ${rate.rule ? 'Too few similar sales nearby to measure it, so this is a rule of thumb.' : `From ${rate.n} similar sales within ¾ mile${rate.beta < 0.5 ? ` the data says ${Math.round(rate.beta * 100)}%, but wrong EPC sizes pull that down, so it's kept at 50% or more` : ''}.`}</p>` : '<p class="hint">Not enough sales nearby to price extra space.</p>'}
-      <div class="seg" role="group" aria-label="What did you measure">
-        <button type="button" id="v-m-add" aria-pressed="${sp.mode === 'add'}">Just the extra space</button>
-        <button type="button" id="v-m-whole" aria-pressed="${sp.mode === 'whole'}">The whole house</button>
+      <h3>Measure extra space</h3>
+      ${rate.rate ? `<p class="hint">A signed-off extension here adds about <b>£${Math.round(rate.rate)} per sq ft (£${num0(rate.rate * SQ_M)} per m²)</b>: ${Math.round(rate.used * 100)}% of the £${Math.round(rate.local)} per sq ft ${esc(loc.w)}. The average also pays for the land, kitchen and location, so each extra sq ft is worth less. Other types count at the % shown. ${rate.rule ? 'Too few similar sales nearby to measure it, so this is a rule of thumb.' : `From ${rate.n} similar sales within ¾ mile${rate.beta < 0.5 ? ` the data says ${Math.round(rate.beta * 100)}%, but wrong EPC sizes pull that down, so it's kept at 50% or more` : ''}.`}</p>` : '<p class="hint">Not enough sales nearby to suggest a figure. Add your own amounts.</p>'}
+      <div class="seg" role="group" aria-label="Units">
+        <button type="button" id="v-u-m2" aria-pressed="${VAL.unit === 'm2'}">m²</button>
+        <button type="button" id="v-u-ft" aria-pressed="${VAL.unit === 'ft'}">sq ft</button>
       </div>
-      <div class="fee-row">
-        <div class="fee-input"><input type="text" id="v-meas" inputmode="decimal" autocomplete="off" placeholder="${sp.mode === 'whole' ? 'Total inside area' : 'e.g. 12.5'}" value="${esc(sp.value)}"></div>
-        <div class="seg" role="group" aria-label="Units">
-          <button type="button" id="v-u-m2" aria-pressed="${sp.unit === 'm2'}">m²</button>
-          <button type="button" id="v-u-ft" aria-pressed="${sp.unit === 'ft'}">sq ft</button>
-        </div>
-      </div>
-      <label for="v-kind">What is it?</label>
-      <select id="v-kind">${SPACE_KINDS.map((k) => `<option value="${k.k}" ${sp.kind === k.k ? 'selected' : ''}>${esc(k.label)}${k.f < 1 ? ` (counted at ${Math.round(k.f * 100)}%)` : ''}</option>`).join('')}</select>
-      <div id="v-space-out" aria-live="polite"></div>
+      <label for="v-whole">Whole house measured (optional)</label>
+      <div class="fee-input"><input type="text" id="v-whole" inputmode="decimal" autocomplete="off" placeholder="Total inside area" value="${esc(VAL.whole)}"><span>${VAL.unit === 'm2' ? 'm²' : 'sq ft'}</span></div>
+      <p class="hint" id="v-whole-out"></p>
+      <div id="v-adds">${items.map(itemHtml).join('')}</div>
+      <div class="stack"><button class="btn" id="v-add" type="button">+ Add ${items.length ? 'another' : 'an'} extension, conservatory or conversion</button></div>
+      ${total ? `<p class="val-big">+ ${money0(total)} <small>agreed</small></p>${R ? `<p>With it, the evidence points to <b>${money0(R.lo + total)} – ${money0(R.hi + total)}</b>.</p>` : ''}` : ''}
+      ${ceilingHtml(C, R, total)}
     </section>
     <div class="stack"><button class="btn pri big" id="v-share" type="button">Share with the owner…</button></div>
     <p class="hint">${esc(VAL.pack.sources)}</p>`;
   $('#v-back').onclick = () => { VAL.home = null; go('value'); };
-  const calc = () => {
-    const raw = parseFloat(String($('#v-meas').value).replace(/[^\d.]/g, ''));
-    const kind = SPACE_KINDS.find((k) => k.k === sp.kind);
-    sp.value = $('#v-meas').value;
-    let out = '', added = null, line = '';
-    if (raw > 0 && rate.rate) {
-      const sqft = sp.unit === 'm2' ? raw * SQ_M : raw;
-      const extra = sp.mode === 'whole' ? (sub.sq ? sqft - sub.sq : null) : sqft;
-      if (extra == null) out = '<p class="hint">There\'s no EPC size to compare the whole house against. Measure just the extra space instead.</p>';
-      else if (extra <= 0) out = `<p class="hint">That's no bigger than the EPC's ${num0(sub.sq)} sq ft, so there's no extra space to add.</p>`;
-      else {
-        added = k5(extra * rate.rate * kind.f) || Math.round(extra * rate.rate * kind.f / 1000) * 1000;
-        const m2 = extra / SQ_M;
-        line = `${num0(extra)} sq ft (${m2.toFixed(1)} m²) of extra space${kind.f < 1 ? ` (${kind.label.toLowerCase()}, counted at ${Math.round(kind.f * 100)}%)` : ''} adds about ${money0(added)}.`;
-        const R = VAL.range;
-        const sf = streetFigure(sub);
-        let extraLine = '';
-        if (R) extraLine = ` With it, the evidence points to ${money0(R.lo + added)} – ${money0(R.hi + added)}.`;
-        const ceil = sf && sf.ceiling;
-        const warn = R && ceil && R.hi + added > ceil.adj ? `<div class="notice warn">That's above the best sale on ${esc(sub.st)} in 10 years (${esc(ceil.h.a)}, ${money0(ceil.adj)} in today's money). Few buyers pay much over a street's top price.</div>` : '';
-        line += extraLine;
-        out = `<p class="val-big">+ ${money0(added)}</p><p>${esc(line)}</p>${warn}`;
-      }
+  const rerender = () => { const y = window.scrollY; renderValueHome(); window.scrollTo(0, y); };
+  $('#v-u-m2').onclick = () => { VAL.unit = 'm2'; rerender(); };
+  $('#v-u-ft').onclick = () => { VAL.unit = 'ft'; rerender(); };
+  const wholeOut = () => {
+    VAL.whole = $('#v-whole').value;
+    const v = toSqft(VAL.whole);
+    $('#v-whole-out').textContent = !v ? '' : !sub.sq ? 'No EPC size to compare with. Add the extra parts below.'
+      : v > sub.sq ? `That's ${num0(v - sub.sq)} sq ft (${((v - sub.sq) / SQ_M).toFixed(1)} m²) more than the EPC's ${num0(sub.sq)} sq ft. Add it below as the right type.`
+      : `That's no bigger than the EPC's ${num0(sub.sq)} sq ft.`;
+  };
+  $('#v-whole').addEventListener('input', wholeOut);
+  wholeOut();
+  $('#v-add').onclick = () => {
+    VAL.adds.push({ kind: 'ext1', size: '', status: 'new', override: null });
+    rerender();
+    const all = document.querySelectorAll('.val-add input[data-f=size]');
+    if (all.length) all[all.length - 1].focus();
+  };
+  const box = $('#v-adds');
+  const itemOf = (el) => { const d = el.closest('.val-add'); return d ? { d, it: VAL.adds[+d.dataset.n] } : {}; };
+  box.addEventListener('change', (e) => {
+    const { it } = itemOf(e.target); if (!it) return;
+    if (e.target.dataset.f === 'kind') { it.kind = e.target.value; it.status = 'new'; it.override = null; it.editing = false; rerender(); }
+    if (e.target.dataset.f === 'size') { it.size = e.target.value; it.status = 'new'; rerender(); }
+  });
+  box.addEventListener('input', (e) => { const { it } = itemOf(e.target); if (it && e.target.dataset.f === 'size') it.size = e.target.value; });
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.f === 'size') e.target.blur(); });
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return;
+    const { d, it } = itemOf(b); if (!it) return;
+    const a = b.dataset.a;
+    if (a === 'del') VAL.adds.splice(+d.dataset.n, 1);
+    if (a === 'agree') { it.status = 'agreed'; it.editing = false; }
+    if (a === 'change') { it.editing = true; it.status = 'new'; }
+    if (a === 'undo') it.status = 'new';
+    if (a === 'useown') {
+      const v = parseInt(String(d.querySelector('input[data-f=override]').value).replace(/[^\d]/g, ''), 10);
+      if (!(v >= 0)) { toast('Type the amount in £'); return; }
+      it.override = v; it.status = 'agreed'; it.editing = false;
     }
-    $('#v-space-out').innerHTML = out;
-    VAL.space = { ...sp, added, line };
-  };
-  const setP = () => {
-    $('#v-m-add').setAttribute('aria-pressed', sp.mode === 'add'); $('#v-m-whole').setAttribute('aria-pressed', sp.mode === 'whole');
-    $('#v-u-m2').setAttribute('aria-pressed', sp.unit === 'm2'); $('#v-u-ft').setAttribute('aria-pressed', sp.unit === 'ft');
-    $('#v-meas').placeholder = sp.mode === 'whole' ? 'Total inside area' : sp.unit === 'm2' ? 'e.g. 12.5' : 'e.g. 135';
-    calc();
-  };
-  $('#v-m-add').onclick = () => { sp.mode = 'add'; setP(); };
-  $('#v-m-whole').onclick = () => { sp.mode = 'whole'; setP(); };
-  $('#v-u-m2').onclick = () => { sp.unit = 'm2'; setP(); };
-  $('#v-u-ft').onclick = () => { sp.unit = 'ft'; setP(); };
-  $('#v-kind').onchange = (e) => { sp.kind = e.target.value; calc(); };
-  $('#v-meas').addEventListener('input', calc);
+    rerender();
+  });
   $('#v-share').onclick = openValueShare;
-  calc();
+}
+
+const toSqft = (v) => { const n = parseFloat(String(v || '').replace(/[^\d.]/g, '')); return n > 0 ? (VAL.unit === 'm2' ? n * SQ_M : n) : null; };
+function localRate(sub) {
+  const sf = streetFigure(sub); if (sf && sf.ok) return { v: sf.med, w: 'on ' + sub.st };
+  const c = comparables(sub).filter((x) => x.h.sq); if (c.length >= 3) return { v: quant(c.map(ppsf), 0.5), w: 'for the comparable sales' };
+  const nf = nearbyFigure(sub); return nf.n >= 5 ? { v: nf.med, w: 'nearby' } : null;
+}
+function suggestFor(it) {
+  const sq = toSqft(it.size);
+  const kind = SPACE_KINDS.find((k) => k.k === it.kind) || SPACE_KINDS[0];
+  if (!sq) return null;
+  const r = VAL.rate && VAL.rate.rate;
+  const added = r ? (k5(sq * r * kind.f) || Math.round(sq * r * kind.f / 1000) * 1000) : 0;
+  const why = `${num0(sq)} sq ft (${(sq / SQ_M).toFixed(1)} m²) ${kind.label.toLowerCase()}${r ? ` × £${Math.round(r)} per sq ft × ${Math.round(kind.f * 100)}%` : ''}.${kind.note ? ' ' + kind.note : ''}`;
+  return { sq, kind, added, why: r ? why : why + ' No local rate, so type your own figure.' };
+}
+function agreedItems() {
+  return VAL.adds.filter((it) => it.status === 'agreed')
+    .map((it) => { const s = suggestFor(it); return s ? { ...s, it, fig: it.override != null ? it.override : s.added } : null; })
+    .filter(Boolean);
+}
+const agreedTotal = () => agreedItems().reduce((t, x) => t + x.fig, 0);
+
+// The street's ceiling: the best sales on the road, and the dearest similar home for sale nearby.
+function ceilingInfo(sub) {
+  if (!sub.st) return null;
+  const onSt = recentSales(10).filter((x) => x.h.st === sub.st && x.h.pc.slice(0, 4) === sub.pc.slice(0, 4));
+  if (!onSt.length) return null;
+  const best = onSt.reduce((m, x) => (x.adj > m.adj ? x : m));
+  const same = onSt.filter((x) => x.h.t === sub.t);
+  const bestSame = same.length ? same.reduce((m, x) => (x.adj > m.adj ? x : m)) : null;
+  const mk = marketNow(sub).rows.map((x) => x.r).filter((r) => r.price);
+  const topAsk = mk.length ? mk.reduce((m, r) => (r.price > m.price ? r : m)) : null;
+  return { best, bestSame, topAsk, n: onSt.length };
+}
+function ceilingHtml(C, R, total) {
+  if (!C) return '';
+  const over = R && R.hi + (total || 0) > C.best.adj;
+  return `<div class="notice ${over ? 'warn' : 'info'} val-ceiling"><b>Ceiling for ${esc(VAL.home.st)}: about ${money0(C.best.adj)}</b><br>
+    Best sale on the road in 10 years: ${esc(C.best.h.a)}, ${money0(C.best.price)} in ${esc(monthYear(C.best.date))} (≈ ${money0(C.best.adj)} today)${C.bestSame && C.bestSame !== C.best ? `. Best ${esc(TYPE_WORD[VAL.home.t] || 'similar')} home: ${esc(C.bestSame.h.a)}, ≈ ${money0(C.bestSame.adj)} today` : ''}.
+    ${C.topAsk ? `<br>Dearest similar home for sale nearby: ${esc(C.topAsk.a)}, asking ${money0(C.topAsk.price)} (${esc(C.topAsk.agent)}).` : ''}
+    <br><small>Why it matters: buyers compare with what's sold on the road, and their surveyors check the price against the same sales, so it's hard to sell much above the best one however much has been spent.${over ? ' Your top figure is above it.' : ''}</small></div>`;
 }
 
 /* ---------------- Share with the owner (tick what goes in) ---------------- */
@@ -409,8 +478,10 @@ function openValueShare() {
   const back = document.createElement('div');
   back.className = 'sheet-backdrop';
   back.innerHTML = `<div class="sheet val-share" role="dialog" aria-label="Share with the owner">
+    <h3>Before you send</h3>
+    <div class="val-before">${ceilingHtml(ceilingInfo(VAL.home), VAL.range, agreedTotal()) || '<p class="hint">Not enough sales on this road to show a ceiling.</p>'}</div>
     <h3>What goes in the message?</h3>
-    <p class="hint">Untick anything that doesn't help. The sources line always goes in.</p>
+    <p class="hint">Untick anything that doesn't help. The sources line always goes in. The ceiling above is just for you.</p>
     <div class="val-ticks">${secs.map((s) => `<label class="val-tick"><input type="checkbox" data-id="${s.id}" ${ticks[s.id] ? 'checked' : ''}> ${esc(s.title)}</label>`).join('')}</div>
     <label for="v-preview">Message (you can edit it)</label>
     <textarea id="v-preview" rows="10"></textarea>
@@ -435,7 +506,7 @@ function openValueShare() {
 // From a door card: jump straight to that home's evidence.
 async function openValueFor(address, postcode) {
   const P = await loadPack();
-  VAL.home = null; VAL.space = null;
+  VAL.home = null; VAL.adds = []; VAL.whole = '';
   VAL.query = String(address || '').split(',')[0] + (postcode ? ' ' + postcode : '');
   if (P) {
     let hits = searchHomes(VAL.query);

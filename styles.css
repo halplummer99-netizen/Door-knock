@@ -313,3 +313,13 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .val-tick input { width: 22px; height: 22px; }
 .val-share textarea { width: 100%; font-size: 0.9rem; }
 .val-tick input { appearance: auto; accent-color: var(--red); }
+.val-add { border: 2px solid var(--line); border-radius: 10px; padding: 10px; margin: 10px 0; background: var(--bg); }
+.val-add.agreed { border-color: var(--ans); }
+.val-add .row select { flex: 1; }
+.val-sugg { margin: 8px 0; }
+.val-sugg small { color: var(--muted); }
+.val-ceiling { margin-top: 12px; }
+.val-ceiling small { display: block; margin-top: 6px; }
+.val-before { margin: 8px 0 12px; }
+.val-add .row > .icon-btn { flex: 0 0 48px; }
+.val-add .row > select { flex: 1 1 auto; min-width: 0; }
