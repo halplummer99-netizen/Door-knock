@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v12';
+const VERSION = 'dk-v13';
 const SHELL = [
   './',
   './index.html',
@@ -9,7 +9,8 @@ const SHELL = [
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/icon-512-maskable.png'
+  './icons/icon-512-maskable.png',
+  './icons/griffin-logo.png'
 ];
 
 self.addEventListener('install', (e) => {
@@ -32,7 +33,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return; // Google APIs go straight to the network
-  if (url.pathname.includes('/fee-calculator/')) return; // separate app with its own service worker
+  if (url.pathname.includes('/fee-calculator/')) return; // old calculator address: a redirect page, always fetched fresh
 
   if (e.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
     e.respondWith(handleShare(e.request));

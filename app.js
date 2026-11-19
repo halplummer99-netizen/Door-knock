@@ -27,7 +27,7 @@ const SITUATIONS = [
   ['renting', 'Renting']
 ];
 const TIMESCALES = ['0-3 months', '3-6 months', '6-12 months', '12+ months', 'Unknown'];
-const DEFAULT_SETTINGS = { apiKey: '', start: 'CM3 5ZF', end: 'CM3 5ZF', chunk: 9 };
+const DEFAULT_SETTINGS = { apiKey: '', start: '', end: '', chunk: 9, name: '' };
 const MAX_STOPS = 25; // Routes API limit for optimizeWaypointOrder
 const PC_RE = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b/gi;
 
@@ -506,13 +506,25 @@ window.addEventListener('popstate', (e) => {
   render();
 });
 $('#tb-home').onclick = () => go(S.run && S.run.status === 'active' ? 'door' : S.run && S.run.status === 'planning' ? 'review' : 'setup');
+$('#tb-fees').onclick = () => go('fees');
 $('#tb-runs').onclick = () => go('history');
 $('#tb-settings').onclick = () => go('settings');
 
+const TAB_OF = { fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
+function showTabs() {
+  const on = TAB_OF[S.view] || 'tb-home';
+  for (const id of ['tb-home', 'tb-fees', 'tb-runs', 'tb-settings']) {
+    if (id === on) $('#' + id).setAttribute('aria-current', 'page'); else $('#' + id).removeAttribute('aria-current');
+  }
+  $('#who').textContent = S.settings.name || '';
+  $('#who').hidden = !S.settings.name;
+}
+
 function render() {
+  showTabs();
   if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings, fees: renderFees }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;
@@ -525,7 +537,8 @@ async function renderSetup() {
     <h2>Plan a run</h2>
     ${active ? `<div class="notice info">You have a run ${active.status === 'active' ? 'in progress' : 'being planned'} (${active.stops.length} stops, ${prettyDate(active.run_date)}).
       <button class="btn pri" id="resume" type="button">${active.status === 'active' ? 'Resume run' : 'Back to route check'}</button></div>` : ''}
-    ${!S.settings.apiKey ? `<div class="notice warn">Add your Google Maps API key before planning. <button class="btn" id="to-settings" type="button">Open Settings</button></div>` : ''}
+    ${!S.settings.apiKey ? `<div class="notice warn">Add your Google Maps API key before planning. <button class="btn" id="to-settings" type="button">Open Settings</button></div>`
+      : !S.settings.start ? `<div class="notice warn">Add your usual start and end postcodes in Settings so they're filled in for you. <button class="btn" id="to-settings" type="button">Open Settings</button></div>` : ''}
     <label for="addr">Addresses, one per line, with postcode</label>
     <textarea id="addr" spellcheck="false" placeholder="12 High Street, Rayleigh SS6 7AB&#10;4 Rectory Road, Hockley SS5 4AA">${esc(draft.text || '')}</textarea>
     <div class="hint" id="addr-count"></div>
@@ -599,6 +612,7 @@ async function planRoute() {
   const start = $('#start').value.trim() || S.settings.start;
   const end = $('#end').value.trim() || S.settings.end;
   if (!lines.length) return toast('Paste or import some addresses first');
+  if (!start || !end) return toast('Put in a start and end point (or save them in Settings)');
   if (lines.length > MAX_STOPS) return toast(`That's ${lines.length} addresses. Max ${MAX_STOPS} per run, so split it in two.`);
   if (!S.settings.apiKey) return go('settings');
 
@@ -1339,6 +1353,9 @@ async function renderSettings() {
   const host = location.hostname ? `${location.protocol}//${location.host}/*` : 'https://YOUR-NAME.github.io/*';
   app.innerHTML = `
     <h2>Settings</h2>
+    <label for="s-name">Your name</label>
+    <input type="text" id="s-name" value="${esc(st.name)}" maxlength="40" autocomplete="name">
+    <div class="hint">Shown at the top of the app.</div>
     <label for="s-key">Google Maps API key</label>
     <div class="row"><input type="password" id="s-key" value="${esc(st.apiKey)}" autocomplete="off" spellcheck="false" style="flex:3">
       <button class="btn small" id="s-show" type="button" style="flex:none">Show</button></div>
@@ -1354,6 +1371,13 @@ async function renderSettings() {
       <button class="btn" id="s-test" type="button">Test my key</button>
     </div>
     <div id="s-result" class="notice info" hidden></div>
+    ${st.apiKey ? `
+    <h3 style="margin-top:24px">Set up a colleague</h3>
+    <p class="hint">Makes a link with their name and your Google key, so the app is ready for them. Their runs and fees stay on their own phone. Usage of the key goes on your Google bill.</p>
+    <label for="c-name">Their full name</label>
+    <input type="text" id="c-name" maxlength="40" autocomplete="off" placeholder="e.g. Ian Divers">
+    <div class="stack"><button class="btn" id="c-share" type="button">Share their link</button></div>
+    <div id="c-result" class="notice info" hidden style="overflow-wrap:anywhere"></div>` : ''}
     <p class="hint" style="margin-top:16px">Storage: ${persisted === true ? 'protected ✓ (Android won’t clear it)' : persisted === false ? 'not yet protected. Install the app to your home screen to protect it.' : 'unknown'}</p>
 
     <details>
@@ -1382,15 +1406,32 @@ async function renderSettings() {
     $('#s-show').textContent = k.type === 'password' ? 'Show' : 'Hide';
   };
   const read = () => ({
+    name: cleanName($('#s-name').value),
     apiKey: $('#s-key').value.trim(),
-    start: $('#s-start').value.trim() || DEFAULT_SETTINGS.start,
-    end: $('#s-end').value.trim() || DEFAULT_SETTINGS.end,
+    start: $('#s-start').value.trim(),
+    end: $('#s-end').value.trim(),
     chunk: Math.max(1, Math.min(9, parseInt($('#s-chunk').value, 10) || 9))
   });
+  if ($('#c-share')) $('#c-share').onclick = async () => {
+    const name = cleanName($('#c-name').value);
+    const out = $('#c-result');
+    if (!name) { toast('Type their name first'); return; }
+    const url = colleagueLink(name, S.settings.apiKey);
+    try {
+      if (navigator.share) { await navigator.share({ title: 'Griffin app', text: `${name}: open this in Chrome, then tap \u22ee > Add to Home screen > Install.`, url }); return; }
+      await navigator.clipboard.writeText(url);
+      out.textContent = 'Link copied: ' + url;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      out.textContent = 'Send them this link: ' + url;
+    }
+    out.hidden = false;
+  };
   $('#s-save').onclick = async () => {
     const before = S.settings.apiKey;
     S.settings = read();
     await DB.put('kv', S.settings, 'settings');
+    showTabs();
     if (before && before !== S.settings.apiKey && mapsPromise) {
       toast('Saved. Restarting to use the new key…');
       setTimeout(() => location.reload(), 900);
@@ -1401,6 +1442,7 @@ async function renderSettings() {
     const say = (cls, t) => { out.hidden = false; out.className = 'notice ' + cls; out.textContent = t; };
     S.settings = read();
     await DB.put('kv', S.settings, 'settings');
+    if (!S.settings.start || !S.settings.end) { say('bad', 'Put in your start and end points first, then test.'); return; }
     say('info', 'Testing…');
     // Check each Google service separately, quoting Google's own error text.
     const lines = [];
@@ -1450,6 +1492,126 @@ async function takeShare() {
   return true;
 }
 
+/* ---------------- Personal links ---------------- */
+// A link like ./?name=Ian+Divers&key=... sets that person's name (and the shared Google key
+// if they have none yet), then tidies the address bar. ?tab=fees opens on the Fee calculator.
+function cleanName(n) { return String(n || '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40); }
+function colleagueLink(name, key) {
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  const q = new URLSearchParams({ name });
+  if (key) q.set('key', key);
+  return base + '?' + q.toString().replace(/%20/g, '+');
+}
+async function takeLinkSetup() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('name') && !q.has('key') && !q.has('tab')) return false;
+  let changed = false;
+  if (q.has('name') && cleanName(q.get('name'))) { S.settings.name = cleanName(q.get('name')); changed = true; }
+  const key = (q.get('key') || '').trim();
+  if (key && !S.settings.apiKey && /^[\w-]{20,60}$/.test(key)) { S.settings.apiKey = key; changed = true; }
+  if (changed) await DB.put('kv', S.settings, 'settings');
+  history.replaceState(null, '', location.pathname);
+  return q.get('tab') === 'fees';
+}
+
+/* ---------------- Fee calculator ---------------- */
+const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
+const FEE_KEY = 'feecalc-v1'; // same storage the old stand-alone calculator used, so saved fees carry over
+const FEE_CHIPS = ['1.2', '1.25', '1.5', '2'];
+function feeNum(str) { // accepts "350,000", "£350k", "1.2%", "1.5m"
+  let t = String(str).trim().toLowerCase().replace(/[£,%\s]/g, '');
+  let mult = 1;
+  if (t.endsWith('k')) { mult = 1e3; t = t.slice(0, -1); } else if (t.endsWith('m')) { mult = 1e6; t = t.slice(0, -1); }
+  if (t === '' || t === '.' || !/^\d*\.?\d*$/.test(t)) return null;
+  return parseFloat(t) * mult;
+}
+function renderFees() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(FEE_KEY)) || {}; } catch (e) { /* ignore */ }
+  const F = { type: saved.type === 'gbp' ? 'gbp' : 'pct', basis: saved.basis === 'inc' ? 'inc' : 'ex' };
+  app.innerHTML = `
+    <h2>Fee calculator</h2>
+    <label for="f-price">Price</label>
+    <div class="fee-input"><span>£</span><input id="f-price" type="text" inputmode="decimal" autocomplete="off" placeholder="Type the price" enterkeyhint="next" value="${esc(S.feePrice || '')}"></div>
+    <label for="f-fee">Fee</label>
+    <div class="fee-row">
+      <div class="fee-input">
+        <span id="f-pre">£</span>
+        <input id="f-fee" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="${esc(saved.fee || '')}">
+        <span id="f-post">%</span>
+      </div>
+      <div class="seg" role="group" aria-label="Fee type">
+        <button type="button" id="f-pct">%</button>
+        <button type="button" id="f-gbp">£</button>
+      </div>
+    </div>
+    <div class="fee-chips" id="f-chips">${FEE_CHIPS.map((c) => `<button type="button" data-fee="${c}">${c}%</button>`).join('')}</div>
+    <span class="label">The fee I typed is</span>
+    <div class="seg" role="group" aria-label="Fee VAT basis">
+      <button type="button" id="f-ex">+ VAT</button>
+      <button type="button" id="f-inc">inc VAT</button>
+    </div>
+    <section class="fee-results" aria-live="polite">
+      <div class="fee-res big"><span class="k">Fee before VAT</span><span class="v" id="r-ex">£0.00</span></div>
+      <div class="fee-res"><span class="k" id="r-vat-label">VAT (20%)</span><span class="v" id="r-vat">£0.00</span></div>
+      <div class="fee-res big inc"><span class="k">Fee inc VAT</span><span class="v" id="r-inc">£0.00</span></div>
+      <p class="fee-note" id="r-note"></p>
+    </section>
+    <div class="fee-vat">
+      <label for="f-vat">VAT rate</label>
+      <div class="fee-input"><input id="f-vat" type="text" inputmode="decimal" autocomplete="off" value="${esc(saved.vat != null ? saved.vat : '20')}"><span>%</span></div>
+    </div>
+    <div class="stack"><button class="btn" id="f-clear" type="button">Clear price</button></div>
+  `;
+  const save = () => {
+    try { localStorage.setItem(FEE_KEY, JSON.stringify({ ...saved, type: F.type, basis: F.basis, fee: $('#f-fee').value, vat: $('#f-vat').value })); } catch (e) { /* ignore */ }
+  };
+  const calc = () => {
+    S.feePrice = $('#f-price').value; // kept while the app is open, so switching tabs doesn't lose it
+    $('#f-pct').setAttribute('aria-pressed', F.type === 'pct');
+    $('#f-gbp').setAttribute('aria-pressed', F.type === 'gbp');
+    $('#f-ex').setAttribute('aria-pressed', F.basis === 'ex');
+    $('#f-inc').setAttribute('aria-pressed', F.basis === 'inc');
+    $('#f-pre').hidden = F.type !== 'gbp';
+    $('#f-post').hidden = F.type !== 'pct';
+    $('#f-fee').placeholder = F.type === 'pct' ? '1.2' : '4,500';
+    $('#f-chips').hidden = F.type !== 'pct';
+    const price = feeNum($('#f-price').value);
+    const fee = feeNum($('#f-fee').value);
+    const vatRate = feeNum($('#f-vat').value) || 0;
+    $('#r-vat-label').textContent = `VAT (${+vatRate.toFixed(3)}%)`;
+    let typed = null; // the fee in £, on whichever basis was typed
+    if (fee != null) typed = F.type === 'gbp' ? fee : price != null ? price * fee / 100 : null;
+    let ex = 0, inc = 0;
+    if (typed != null) {
+      if (F.basis === 'ex') { ex = typed; inc = typed * (1 + vatRate / 100); } else { inc = typed; ex = typed / (1 + vatRate / 100); }
+    }
+    ex = Math.round(ex * 100) / 100; // pennies; VAT is the difference so the lines always add up
+    inc = Math.round(inc * 100) / 100;
+    $('#r-ex').textContent = gbp.format(ex);
+    $('#r-vat').textContent = gbp.format(inc - ex);
+    $('#r-inc').textContent = gbp.format(inc);
+    $('#r-note').textContent = price != null && price > 0 && typed != null
+      ? `On ${gbp.format(price)}: ${+(ex / price * 100).toFixed(3)}% + VAT, or ${+(inc / price * 100).toFixed(3)}% inc VAT.`
+      : F.type === 'pct' && fee != null && price == null ? 'Put in the price to see the fee.' : '';
+  };
+  const update = () => { save(); calc(); };
+  for (const id of ['#f-price', '#f-fee', '#f-vat']) $(id).addEventListener('input', update);
+  $('#f-price').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#f-fee').focus(); });
+  $('#f-fee').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#f-fee').blur(); });
+  $('#f-price').addEventListener('blur', () => {
+    const p = feeNum($('#f-price').value);
+    if (p != null) { $('#f-price').value = p.toLocaleString('en-GB', { maximumFractionDigits: 2 }); S.feePrice = $('#f-price').value; }
+  });
+  $('#f-pct').onclick = () => { if (F.type !== 'pct') { F.type = 'pct'; $('#f-fee').value = ''; } update(); };
+  $('#f-gbp').onclick = () => { if (F.type !== 'gbp') { F.type = 'gbp'; $('#f-fee').value = ''; } update(); };
+  $('#f-ex').onclick = () => { F.basis = 'ex'; update(); };
+  $('#f-inc').onclick = () => { F.basis = 'inc'; update(); };
+  $('#f-chips').onclick = (e) => { const b = e.target.closest('button[data-fee]'); if (b) { $('#f-fee').value = b.dataset.fee; update(); } };
+  $('#f-clear').onclick = () => { $('#f-price').value = ''; calc(); $('#f-price').focus(); };
+  calc();
+}
+
 /* ---------------- Start-up ---------------- */
 async function init() {
   try {
@@ -1464,7 +1626,9 @@ async function init() {
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if (await takeShare()) return;
-  S.view = !S.settings.apiKey && !S.run ? 'settings'
+  const wantFees = await takeLinkSetup();
+  S.view = wantFees ? 'fees'
+    : !S.settings.apiKey && !S.run ? 'settings'
     : S.run && S.run.status === 'active' ? 'door'
     : S.run && S.run.status === 'planning' ? 'review'
     : 'setup';
