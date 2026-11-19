@@ -7,7 +7,7 @@
    so it works with no signal. Loaded before app.js; uses its helpers ($, esc, DB, S, toast, go).
    ============================================================ */
 
-const VAL = { pack: null, homes: null, home: null, query: '', adds: [], whole: '', unit: 'm2', shareTicks: null };
+const VAL = { pack: null, homes: null, home: null, query: '', adds: [], whole: '', unit: 'm2', shareTicks: null, bedsConfirmed: {}, bedsLoaded: false };
 const SQ_M = 10.764;
 const YEAR_MS = 365.25 * 86400000;
 // What extra space is worth compared with a proper, signed-off extension (Hal can change these).
@@ -50,7 +50,41 @@ function trimOutliers(vals) {
 }
 
 /* ---------------- Loading the area pack ---------------- */
+// EPC "habitable rooms" to bedrooms for houses, from 217 SS17 homes on both Sprift and the EPC register
+// (Nov 2026): 4-5 rooms is usually a 3-bed, 6-7 a 4-bed. Right about 2 times in 3, so it's only a guess.
+const HOUSE_BEDS = { 1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4, 8: 5 };
+function bedsOf(h) {
+  const mine = VAL.bedsConfirmed[homeId(h)];
+  if (mine) return { n: mine, src: 'you' };
+  if (h.bd) return { n: Math.min(h.bd, 6), src: 'Sprift' };
+  if (h.r) return { n: Math.min(h.t === 'flat' ? Math.max(1, h.r - 1) : (HOUSE_BEDS[h.r] || 5), 6), src: 'EPC rooms', guess: true };
+  if (h === VAL.home && h.sq) return sizeGuess(h);
+  return null;
+}
+// No room count (common on new builds): pick the bedroom count whose nearby homes are closest in size.
+function sizeGuess(h) {
+  if (h._sizeBeds !== undefined) return h._sizeBeds;
+  const here = VAL.pack.pts[h.pc], flat = h.t === 'flat';
+  const by = {};
+  for (const x of VAL.homes) {
+    if (x === h || !x.sq || (x.t === 'flat') !== flat || (!x.r && !x.bd)) continue;
+    if ((km(here, VAL.pack.pts[x.pc]) ?? 99) > 1.2) continue;
+    const n = bedsOf(x).n; (by[n] = by[n] || []).push(x.sq);
+  }
+  let best = null;
+  for (const [n, sizes] of Object.entries(by)) {
+    if (sizes.length < 5) continue;
+    const gap = Math.abs(quant(sizes, 0.5) - h.sq);
+    if (!best || gap < best.gap) best = { n: +n, gap };
+  }
+  h._sizeBeds = best ? { n: best.n, src: 'size', guess: true } : null;
+  return h._sizeBeds;
+}
+const homeId = (h) => (h.a + '|' + h.pc).toLowerCase();
+const bedWord = (b) => (b ? `${b.guess ? '≈' : ''}${b.n === 6 ? '6+' : b.n} bed` : '');
+
 async function loadPack() {
+  if (!VAL.bedsLoaded) { VAL.bedsConfirmed = (await DB.get('kv', 'bedsConfirmed')) || {}; VAL.bedsLoaded = true; }
   if (VAL.pack) return VAL.pack;
   const p = await DB.get('kv', 'areaPack');
   if (p) setPack(p);
@@ -92,16 +126,18 @@ function searchHomes(q) {
 function recentSales(years) {
   const since = new Date(new Date(VAL.pack.built).getTime() - years * YEAR_MS).toISOString().slice(0, 10);
   const out = [];
-  for (const h of VAL.homes) for (const s of h.s || []) if (s[0] >= since) out.push({ h, date: s[0], price: s[1], adj: s[2] || s[1], nb: !!s[3] });
+  // s[4]: 1 = company/bulk/repossession sale, 2 = the land before it was built. Neither is evidence.
+  for (const h of VAL.homes) for (const s of h.s || []) if (s[0] >= since && !s[4]) out.push({ h, date: s[0], price: s[1], adj: s[2] || s[1], nb: !!s[3] });
   return out;
 }
-function lastSale(h) { const s = h.s && h.s[h.s.length - 1]; return s ? { date: s[0], price: s[1], adj: s[2], nb: !!s[3] } : null; }
+function lastSale(h) { const ok = (h.s || []).filter((x) => !x[4]); const s = ok[ok.length - 1]; return s ? { date: s[0], price: s[1], adj: s[2], nb: !!s[3] } : null; }
 const ppsf = (x) => (x.h.sq ? x.adj / x.h.sq : null);
 
 function comparables(sub) {
   const here = VAL.pack.pts[sub.pc];
   const built = new Date(VAL.pack.built).getTime();
   const cands = [];
+  const sb = bedsOf(sub);
   for (const x of recentSales(5)) {
     const h = x.h;
     if (h === sub || !h.sq) continue;
@@ -111,8 +147,12 @@ function comparables(sub) {
     const sameSt = sub.st && h.st === sub.st;
     const sizeDiff = sub.sq ? (h.sq - sub.sq) / sub.sq : 0;
     const yrs = (built - new Date(x.date).getTime()) / YEAR_MS;
-    const score = (sameSt ? 3 : 0) - 2 * d - 5 * Math.abs(sizeDiff) - 0.5 * yrs + (sub.ag && h.ag === sub.ag ? 0.5 : 0) - (x.nb ? 1 : 0);
+    const hb = bedsOf(h);
+    const bedGap = sb && hb ? Math.abs(hb.n - sb.n) : null;
+    const bedScore = bedGap == null ? 0 : (bedGap === 0 ? 1.5 : -2 * bedGap) * (hb.guess ? 0.6 : 1);
+    const score = (sameSt ? 3 : 0) - 2 * d - 5 * Math.abs(sizeDiff) - 0.5 * yrs + (sub.ag && h.ag === sub.ag ? 0.5 : 0) - (x.nb ? 1 : 0) + bedScore;
     const why = [];
+    if (hb) why.push(bedWord(hb));
     if (sameSt) why.push('same street'); else why.push(miles(d));
     if (sub.sq) why.push(Math.abs(sizeDiff) < 0.05 ? 'same size' : `${sizeDiff > 0 ? '+' : ''}${Math.round(sizeDiff * 100)}% size`);
     why.push(yrs < 1 ? `${Math.max(1, Math.round(yrs * 12))} months ago` : `${yrs.toFixed(1)} years ago`);
@@ -172,9 +212,13 @@ function extraSpaceRate(sub, local) {
 }
 
 function evidenceRange(sub, comps) {
-  if (sub.sq && comps.length >= 3) {
-    const v = comps.map(ppsf);
-    return { lo: k5(sub.sq * quant(v, 0.25)), hi: k5(sub.sq * quant(v, 0.75)), basis: `${sub.sq.toLocaleString('en-GB')} sq ft × £${Math.round(quant(v, 0.25))}–£${Math.round(quant(v, 0.75))} per sq ft from the comparable sales` };
+  // The way a valuer adjusts: each comparable's price today, plus or minus the size difference at the
+  // extra-space rate (not the average £/sq ft, which overstates big homes against small ones).
+  const loc = sub.sq ? localRate(sub) : null;
+  const rate = loc ? extraSpaceRate(sub, loc.v).rate : null;
+  if (sub.sq && rate && comps.length >= 3) {
+    const v = comps.map((c) => c.adj + (sub.sq - c.h.sq) * rate);
+    return { lo: k5(quant(v, 0.25)), hi: k5(quant(v, 0.75)), basis: `The ${comps.length} comparable sales in today's money, each adjusted for its size difference from this home's ${sub.sq.toLocaleString('en-GB')} sq ft at £${Math.round(rate)} per sq ft` };
   }
   if (comps.length >= 3) {
     const v = comps.map((c) => c.adj);
@@ -194,7 +238,7 @@ function marketNow(sub) {
   const kindOf = (t) => (TYPE_RE.flat.test(t) ? 'flat' : 'house');
   const wantType = (r) => !sub.t || kindOf(r.type || '') === (sub.t === 'flat' ? 'flat' : 'house');
   const exact = (r) => sub.t && TYPE_RE[sub.t] && TYPE_RE[sub.t].test(r.type || '');
-  const live = rows.filter((r) => r !== own && !r.withdrawn && !r.fell && r.price && wantType(r));
+  const live = rows.filter((r) => r !== own && !r.withdrawn && !r.fell && r.price >= 50000 && wantType(r)); // under £50k = garages and plots
   const scored = live.map((r) => ({ r, d: km(here, pts[r.pc]) ?? 99, same: sub.st && r.a.toLowerCase().includes(sub.st.toLowerCase()) }))
     .filter((x) => x.same || x.d <= 0.8).sort((a, b) => (b.same - a.same) || (exact(b.r) - exact(a.r)) || a.d - b.d).slice(0, 6);
   return { rows: scored, own };
@@ -211,6 +255,8 @@ function buildSections(sub) {
   // 1. The home
   {
     const bits = [];
+    const sbd = bedsOf(sub);
+    if (sbd && !sbd.guess) bits.push(`${sbd.n === 6 ? '6+' : sbd.n} bedrooms`);
     if (sub.dw || sub.t) bits.push(sub.dw || TYPE_WORD[sub.t]);
     if (sub.sq) bits.push(`${sub.sq.toLocaleString('en-GB')} sq ft (${Math.round(sub.m2)} m²) on its EPC (${monthYear(sub.d)})`);
     if (sub.b) bits.push(`energy rating ${sub.b}${sub.p && sub.p !== sub.b ? `, could reach ${sub.p}` : ''}`);
@@ -223,7 +269,7 @@ function buildSections(sub) {
 
   // 2. Its history
   if (sub.s && sub.s.length) {
-    const rows = sub.s.map((s) => `${monthYear(s[0])}: ${money0(s[1])}${s[3] ? ' (new build)' : ''}`);
+    const rows = sub.s.map((s) => `${monthYear(s[0])}: ${money0(s[1])}${s[3] ? ' (new build)' : ''}${s[4] === 1 ? ' (company, bulk or repossession sale, not used as evidence)' : s[4] === 2 ? ' (the land or site before it was built, not used)' : ''}`);
     const story = last && last.adj && last.date < P.hpiLatest ? `Bought ${monthYear(last.date)} for ${money0(last.price)}. ${TYPE_WORD[sub.t] ? 'Local ' + TYPE_WORD[sub.t] : 'Local'} prices have moved since, which on their own would put it around ${money0(last.adj)} today (UK House Price Index, Thurrock).` : '';
     secs.push({ id: 'history', title: 'Sale history', html: `<ul class="val-list">${rows.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>${story ? `<p>${esc(story)}</p>` : ''}`, text: rows.join('\n') + (story ? '\n' + story : ''), on: false });
   }
@@ -236,7 +282,36 @@ function buildSections(sub) {
       <small>${num0(c.h.sq)} sq ft · £${Math.round(ppsf(c))}/sq ft · ${esc(c.why.join(' · '))}</small></li>`).join('')}</ul>
       <p class="hint">"Today" adds the local price change since each sale (UK House Price Index).</p>`;
     const text = comps.map((c) => `• ${c.h.a}: sold ${monthYear(c.date)} for ${money0(c.price)} (${num0(c.h.sq)} sq ft, £${Math.round(ppsf(c))} per sq ft in today's money)`).join('\n');
-    secs.push({ id: 'comps', title: 'Similar homes sold', html, text, on: true });
+    const table = { cols: [{ h: 'ADDRESS', w: 0.38 }, { h: 'SOLD', w: 0.13 }, { h: 'PRICE', w: 0.15, right: true }, { h: 'TODAY', w: 0.13, right: true }, { h: 'SIZE', w: 0.11, right: true }, { h: '£/SQ FT', w: 0.10, right: true }],
+      rows: comps.map((c) => ({ cells: [c.h.a, monthYear(c.date), money0(c.price), money0(c.adj), num0(c.h.sq) + ' sq ft', '£' + Math.round(ppsf(c))] })) };
+    secs.push({ id: 'comps', title: 'Similar homes sold', html, text, on: true, table, note: "Today = the sale price brought up to date with the local House Price Index. £/sq ft is in today's money." });
+  }
+
+  // 3b. By bedrooms: on the street and within half a mile
+  {
+    const sb = bedsOf(sub);
+    const here = P.pts[sub.pc];
+    const kind = (h) => (h.t === 'flat' ? 'flat' : 'house');
+    const pool = recentSales(5).filter((x) => x.h !== sub && kind(x.h) === kind(sub) && bedsOf(x.h));
+    const group = (rows) => {
+      const g = {};
+      for (const x of rows) { const n = bedsOf(x.h).n; (g[n] = g[n] || []).push(x); }
+      return Object.entries(g).map(([n, xs]) => ({ n: +n, k: xs.length, med: quant(xs.map((x) => x.adj), 0.5), ppsf: quant(xs.filter((x) => x.h.sq).map(ppsf), 0.5) })).sort((a, b) => a.n - b.n);
+    };
+    const onSt = group(pool.filter((x) => sub.st && x.h.st === sub.st && x.h.pc.slice(0, 4) === sub.pc.slice(0, 4)));
+    const near = group(pool.filter((x) => (km(here, P.pts[x.h.pc]) ?? 99) <= 0.8));
+    const row = (g) => `<tr${sb && g.n === sb.n ? ' class="me"' : ''}><td>${g.n === 6 ? '6+' : g.n} bed</td><td>${money0(k5(g.med))}</td><td>${g.ppsf ? '£' + Math.round(g.ppsf) : '–'}</td><td>${g.k}${g.k < 3 ? ' ⚠' : ''}</td></tr>`;
+    const table = (gs) => `<table class="val-beds"><tr><th></th><th>Typical</th><th>/sq ft</th><th>Sales</th></tr>${gs.map(row).join('')}</table>`;
+    if (onSt.length || near.length) {
+      const pick = (gs) => (sb ? gs.find((g) => g.n === sb.n) : null);
+      const a = pick(onSt), b = pick(near);
+      const lines = [];
+      if (a) lines.push(`${sb.n}-bed homes on ${sub.st}: typically ${money0(k5(a.med))} in today's money (${a.k} sale${a.k > 1 ? 's' : ''} in 5 years)`);
+      if (b) lines.push(`${sb.n}-bed ${kind(sub) === 'flat' ? 'flats' : 'houses'} within half a mile: typically ${money0(k5(b.med))}${b.ppsf ? `, £${Math.round(b.ppsf)} per sq ft` : ''} (${b.k} sales)`);
+      const tbl = near.length ? { cols: [{ h: 'WITHIN HALF A MILE', w: 0.4 }, { h: 'TYPICAL PRICE', w: 0.24, right: true }, { h: '£/SQ FT', w: 0.18, right: true }, { h: 'SALES', w: 0.18, right: true }],
+        rows: near.map((g) => ({ hi: sb && g.n === sb.n, cells: [`${g.n === 6 ? '6+' : g.n} bedroom${g.n > 1 ? 's' : ''}`, money0(k5(g.med)), g.ppsf ? '£' + Math.round(g.ppsf) : '-', String(g.k)] })) } : null;
+      secs.push({ id: 'beds', title: 'By bedrooms', table: tbl, html: `${onSt.length ? `<h4>${esc(sub.st)}</h4>${table(onSt)}` : ''}${near.length ? `<h4>Within half a mile</h4>${table(near)}` : ''}<p class="hint">Last 5 years, in today's money. Bedrooms are exact where the home was listed on Sprift or you've confirmed it, otherwise estimated from EPC rooms. ⚠ = fewer than 3 sales.</p>`, text: lines.join('\n'), on: !!lines.length });
+    }
   }
 
   // 4. £ per sq ft on the street
@@ -329,7 +404,7 @@ function renderValueHome() {
   VAL.secs = secs;
   const loc = localRate(sub);
   const rate = extraSpaceRate(sub, loc && loc.v);
-  VAL.rate = rate;
+  VAL.rate = { ...rate, home: sub };
   const C = ceilingInfo(sub);
   const items = VAL.adds;
   const kindOpts = (sel) => SPACE_KINDS.map((k) => `<option value="${k.k}" ${sel === k.k ? 'selected' : ''}>${esc(k.label)} (${Math.round(k.f * 100)}%)</option>`).join('');
@@ -352,6 +427,7 @@ function renderValueHome() {
     <button class="btn small" id="v-back" type="button">← Search again</button>
     <h2>${esc(sub.a)}</h2>
     <p class="meta">${esc(sub.pc)}${sub.st ? ' · ' + esc(sub.st) : ''}</p>
+    ${bedPicker(sub)}
     ${secs.map((s) => `<section class="val-sec" id="sec-${s.id}"><h3>${esc(s.title)}</h3>${s.html}</section>`).join('')}
     <section class="val-sec" id="sec-measure">
       <h3>Measure extra space</h3>
@@ -371,6 +447,13 @@ function renderValueHome() {
     <div class="stack"><button class="btn pri big" id="v-share" type="button">Share with the owner…</button></div>
     <p class="hint">${esc(VAL.pack.sources)}</p>`;
   $('#v-back').onclick = () => { VAL.home = null; go('value'); };
+  $('#v-beds').onclick = async (e) => {
+    const b = e.target.closest('button[data-b]'); if (!b) return;
+    const id = homeId(sub), n = +b.dataset.b;
+    if (VAL.bedsConfirmed[id] === n) delete VAL.bedsConfirmed[id]; else VAL.bedsConfirmed[id] = n;
+    await DB.put('kv', VAL.bedsConfirmed, 'bedsConfirmed');
+    const y = window.scrollY; renderValueHome(); window.scrollTo(0, y);
+  };
   const rerender = () => { const y = window.scrollY; renderValueHome(); window.scrollTo(0, y); };
   $('#v-u-m2').onclick = () => { VAL.unit = 'm2'; rerender(); };
   $('#v-u-ft').onclick = () => { VAL.unit = 'ft'; rerender(); };
@@ -416,6 +499,16 @@ function renderValueHome() {
   $('#v-share').onclick = openValueShare;
 }
 
+function bedPicker(sub) {
+  const b = bedsOf(sub);
+  const note = !b ? 'Not known. Tap the right number.' : b.src === 'you' ? 'You confirmed this. Tap it again to undo.' : b.src === 'Sprift' ? 'From its Sprift listing. Tap another number if it has changed.'
+    : b.src === 'size' ? `Our best guess from its size (${num0(sub.sq)} sq ft) against nearby homes, already used below. Wrong? Tap the right number.`
+    : `Our best guess from the EPC (${sub.r} rooms), already used below. Wrong? Tap the right number.`;
+  return `<section class="val-sec val-bedpick"><h3>Bedrooms</h3>
+    <div class="seg" id="v-beds" role="group" aria-label="Bedrooms">${[1, 2, 3, 4, 5, 6].map((n) => `<button type="button" data-b="${n}" aria-pressed="${!!b && b.n === n && !b.guess}"${b && b.n === n && b.guess ? ' class="guess"' : ''}>${n === 6 ? '6+' : n}</button>`).join('')}</div>
+    <p class="hint">${esc(note)} Comparables, bedroom averages and the ceiling follow it.</p></section>`;
+}
+
 const toSqft = (v) => { const n = parseFloat(String(v || '').replace(/[^\d.]/g, '')); return n > 0 ? (VAL.unit === 'm2' ? n * SQ_M : n) : null; };
 function localRate(sub) {
   const sf = streetFigure(sub); if (sf && sf.ok) return { v: sf.med, w: 'on ' + sub.st };
@@ -426,7 +519,8 @@ function suggestFor(it) {
   const sq = toSqft(it.size);
   const kind = SPACE_KINDS.find((k) => k.k === it.kind) || SPACE_KINDS[0];
   if (!sq) return null;
-  const r = VAL.rate && VAL.rate.rate;
+  if (!VAL.rate || VAL.rate.home !== VAL.home) { const loc = localRate(VAL.home); VAL.rate = { ...extraSpaceRate(VAL.home, loc && loc.v), home: VAL.home }; }
+  const r = VAL.rate.rate;
   const added = r ? (k5(sq * r * kind.f) || Math.round(sq * r * kind.f / 1000) * 1000) : 0;
   const why = `${num0(sq)} sq ft (${(sq / SQ_M).toFixed(1)} m²) ${kind.label.toLowerCase()}${r ? ` × £${Math.round(r)} per sq ft × ${Math.round(kind.f * 100)}%` : ''}.${kind.note ? ' ' + kind.note : ''}`;
   return { sq, kind, added, why: r ? why : why + ' No local rate, so type your own figure.' };
@@ -446,15 +540,18 @@ function ceilingInfo(sub) {
   const best = onSt.reduce((m, x) => (x.adj > m.adj ? x : m));
   const same = onSt.filter((x) => x.h.t === sub.t);
   const bestSame = same.length ? same.reduce((m, x) => (x.adj > m.adj ? x : m)) : null;
+  const sb = bedsOf(sub);
+  const sameBeds = sb ? onSt.filter((x) => bedsOf(x.h) && bedsOf(x.h).n === sb.n) : [];
+  const bestBeds = sameBeds.length ? sameBeds.reduce((m, x) => (x.adj > m.adj ? x : m)) : null;
   const mk = marketNow(sub).rows.map((x) => x.r).filter((r) => r.price);
   const topAsk = mk.length ? mk.reduce((m, r) => (r.price > m.price ? r : m)) : null;
-  return { best, bestSame, topAsk, n: onSt.length };
+  return { best, bestSame, bestBeds, beds: sb, topAsk, n: onSt.length };
 }
 function ceilingHtml(C, R, total) {
   if (!C) return '';
   const over = R && R.hi + (total || 0) > C.best.adj;
   return `<div class="notice ${over ? 'warn' : 'info'} val-ceiling"><b>Ceiling for ${esc(VAL.home.st)}: about ${money0(C.best.adj)}</b><br>
-    Best sale on the road in 10 years: ${esc(C.best.h.a)}, ${money0(C.best.price)} in ${esc(monthYear(C.best.date))} (≈ ${money0(C.best.adj)} today)${C.bestSame && C.bestSame !== C.best ? `. Best ${esc(TYPE_WORD[VAL.home.t] || 'similar')} home: ${esc(C.bestSame.h.a)}, ≈ ${money0(C.bestSame.adj)} today` : ''}.
+    Best sale on the road in 10 years: ${esc(C.best.h.a)}, ${money0(C.best.price)} in ${esc(monthYear(C.best.date))} (≈ ${money0(C.best.adj)} today)${C.bestSame && C.bestSame !== C.best ? `. Best ${esc(TYPE_WORD[VAL.home.t] || 'similar')} home: ${esc(C.bestSame.h.a)}, ≈ ${money0(C.bestSame.adj)} today` : ''}${C.bestBeds && C.bestBeds !== C.best ? `. Best ${C.beds.n}-bed: ${esc(C.bestBeds.h.a)}, ≈ ${money0(C.bestBeds.adj)} today` : ''}.
     ${C.topAsk ? `<br>Dearest similar home for sale nearby: ${esc(C.topAsk.a)}, asking ${money0(C.topAsk.price)} (${esc(C.topAsk.agent)}).` : ''}
     <br><small>Why it matters: buyers compare with what's sold on the road, and their surveyors check the price against the same sales, so it's hard to sell much above the best one however much has been spent.${over ? ' Your top figure is above it.' : ''}</small></div>`;
 }
@@ -471,6 +568,33 @@ function composeShare(ticks) {
   const from = S.settings.name ? `${S.settings.name}, Griffin` : 'Griffin';
   return [`${sub.a}, ${sub.pc}`, ...secs.map((s) => `*${s.title}*\n${s.text}`), `From ${from}`, `_${valueFooter(!!ticks.market)}_`].join('\n\n');
 }
+function pdfData(ticks, note) {
+  const sub = VAL.home;
+  // The range is the first tile, so it isn't repeated as a section. Strongest evidence first.
+  const ORDER = ['home', 'street', 'space', 'comps', 'beds', 'market', 'history'];
+  const all = buildSections(sub).secs.filter((s) => s.text && ticks[s.id] && s.id !== 'range').sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+  const tiles = [];
+  const R = VAL.range, tot = agreedTotal();
+  if (R && ticks.range) tiles.push({ k: 'What the evidence says', v: `${money0(tot ? R.lo + tot : R.lo)} – ${money0(tot ? R.hi + tot : R.hi)}`, s: tot ? 'Including the extra space measured' : 'Before condition, layout, garden and parking' });
+  const sf = streetFigure(sub);
+  if (ticks.street && sf && sf.ok) tiles.push({ k: `£ per sq ft, ${sub.st}`, v: `£${Math.round(sf.med)}`, s: `From ${sf.n} sales, in today's money` });
+  else if (ticks.street) { const nf = nearbyFigure(sub); if (nf.n >= 5) tiles.push({ k: '£ per sq ft nearby', v: `£${Math.round(nf.med)}`, s: `Similar homes within half a mile, ${nf.n} sales` }); }
+  const b = bedsOf(sub);
+  if (ticks.home && (b || sub.sq)) tiles.push({ k: 'Your home', v: [b && !b.guess ? `${b.n === 6 ? '6+' : b.n} bed` : '', sub.sq ? `${num0(sub.sq)} sq ft` : ''].filter(Boolean).join(' · '), s: [TYPE_WORD[sub.t], sub.b ? 'EPC ' + sub.b : ''].filter(Boolean).join(' · ') });
+  const sections = all.map((x) => {
+    const lines = x.text.split('\n').filter(Boolean);
+    if (x.id === 'comps') return { title: x.title, table: x.table, lines: [x.note] };
+    if (x.id === 'beds') return { title: x.title, table: x.table, lines };
+    if (x.id === 'street' || x.id === 'range') return { title: x.title, lines: lines.map((l) => l.replace(/^[^:]+: (?=£)/, '')) };
+    return { title: x.title, lines };
+  });
+  const from = S.settings.name ? `${S.settings.name}, Griffin` : 'Griffin';
+  return { address: sub.a, sub: [sub.pc, sub.st].filter(Boolean).join(' · '), postcode: sub.pc, from, note,
+    date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), tiles, sections,
+    disclaimer: valueFooter(!!ticks.market) };
+}
+const pdfName = () => `Market appraisal - ${VAL.home.a}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+
 function openValueShare() {
   const secs = buildSections(VAL.home).secs.filter((s) => s.text);
   VAL.shareTicks = VAL.shareTicks || {};
@@ -483,9 +607,14 @@ function openValueShare() {
     <h3>What goes in the message?</h3>
     <p class="hint">Untick anything that doesn't help. The sources line always goes in. The ceiling above is just for you.</p>
     <div class="val-ticks">${secs.map((s) => `<label class="val-tick"><input type="checkbox" data-id="${s.id}" ${ticks[s.id] ? 'checked' : ''}> ${esc(s.title)}</label>`).join('')}</div>
+    <label for="v-note">A note at the top of the PDF (optional)</label>
+    <textarea id="v-note" rows="3" placeholder="e.g. Lovely to meet you today. Here's the evidence we talked about.">${esc(VAL.pdfNote || '')}</textarea>
+    <div class="stack"><button class="btn pri big" id="v-pdf" type="button">Send Griffin PDF…</button><button class="btn" id="v-pdf-view" type="button">Preview the PDF</button></div>
+    <details><summary>Or send it as a WhatsApp message</summary>
     <label for="v-preview">Message (you can edit it)</label>
     <textarea id="v-preview" rows="10"></textarea>
-    <div class="row"><button class="btn pri" id="v-send" type="button">Send…</button><button class="btn" id="v-copy" type="button">Copy</button><button class="btn" id="v-close" type="button">Close</button></div>
+    <div class="row"><button class="btn" id="v-send" type="button">Send message…</button><button class="btn" id="v-copy" type="button">Copy</button></div></details>
+    <div class="stack"><button class="btn" id="v-close" type="button">Close</button></div>
   </div>`;
   document.body.appendChild(back);
   const pv = back.querySelector('#v-preview');
@@ -499,6 +628,21 @@ function openValueShare() {
     const text = pv.value;
     if (navigator.share) { try { await navigator.share({ text }); return; } catch (e) { if (e.name === 'AbortError') return; } }
     window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  };
+  const makePdf = async () => { VAL.pdfNote = back.querySelector('#v-note').value.trim(); return PDFX.build(pdfData(ticks, VAL.pdfNote)); };
+  back.querySelector('#v-pdf-view').onclick = async () => {
+    const url = URL.createObjectURL(await makePdf());
+    window.open(url, '_blank') || (location.href = url);
+  };
+  back.querySelector('#v-pdf').onclick = async () => {
+    const blob = await makePdf();
+    const file = new File([blob], pdfName(), { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: pdfName().replace(/\.pdf$/, '') }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = pdfName(); document.body.appendChild(a); a.click(); a.remove();
+    toast('PDF saved to Downloads. Attach it in WhatsApp.');
   };
   refresh();
 }
