@@ -470,7 +470,7 @@ function buildSections(sub) {
 
   // 7. For sale nearby now (Sprift): same bedrooms, within ¼ or ½ mile, coloured by size against this home.
   const mk = marketSameBeds(sub, VAL.mkR || 0.25);
-  if (mk.own || mk.all) {
+  if ((VAL.pack.market || []).length) { // always shown, so the ¼ / ½ mile buttons are there even when nothing matches
     const ownLine = mk.own ? `This home: on with ${mk.own.agent} at ${money0(mk.own.price)} since ${monthYear(mk.own.listed)}${mk.own.reduced ? ` (reduced ${money0(mk.own.reducedBy)} in ${monthYear(mk.own.reduced)})` : ''}${mk.own.withdrawn ? `, withdrawn ${monthYear(mk.own.withdrawn)}` : ''}.` : '';
     const wk = (r) => `${weeksOn(r.listed)} week${weeksOn(r.listed) === 1 ? '' : 's'} on`;
     const sizeTxt = (x) => (x.diff == null ? 'size unknown' : Math.abs(x.diff) < 0.1 ? `similar size${x.sq ? ' (' + num0(x.sq) + ' sq ft)' : ''}` : `${num0(x.sq)} sq ft, ${Math.abs(Math.round(x.diff * 100))}% ${x.diff > 0 ? 'bigger' : 'smaller'}`);
