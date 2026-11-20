@@ -154,12 +154,16 @@ function recentSales(years) {
 function lastSale(h) { const ok = (h.s || []).filter((x) => !x[4]); const s = ok[ok.length - 1]; return s ? { date: s[0], price: s[1], adj: s[2], nb: !!s[3] } : null; }
 const ppsf = (x) => (x.h.sq ? x.adj / x.h.sq : null);
 
+// Agents look at sales from the last 6 months; up to 12 is the default here, older only when asked.
+const COMP_WINDOWS = [{ y: 0.5, label: 'Last 6 months' }, { y: 1, label: 'Last 12 months' }, { y: 5, label: 'Older too (5 years)' }];
+const compYears = () => VAL.compYears || 1;
+const ageClass = (iso) => { const m = (new Date(VAL.pack.built).getTime() - new Date(iso).getTime()) / (YEAR_MS / 12); return m <= 6 ? 'g' : m <= 12 ? 'a' : 'x'; };
 function comparables(sub) {
   const here = VAL.pack.pts[sub.pc];
   const built = new Date(VAL.pack.built).getTime();
   const cands = [];
   const sb = bedsOf(sub);
-  for (const x of recentSales(5)) {
+  for (const x of recentSales(compYears())) {
     const h = x.h;
     if (h === sub || !h.sq) continue;
     if (sub.t ? h.t !== sub.t : !isHouse(h.t)) continue;
@@ -360,18 +364,30 @@ function buildSections(sub) {
 
   // 3. Comparables
   const comps = comparables(sub);
+  const winLabel = COMP_WINDOWS.find((w) => w.y === compYears()).label;
+  const winBtns = `<div class="seg val-win" id="v-win" role="group" aria-label="How recent">${COMP_WINDOWS.map((w) => `<button type="button" data-y="${w.y}" aria-pressed="${compYears() === w.y}">${w.label.replace(' (5 years)', '')}</button>`).join('')}</div>`;
+  let fewNote = comps.length < 3 ? `<div class="notice warn">Only ${comps.length} similar sale${comps.length === 1 ? '' : 's'} in the ${winLabel.toLowerCase()}.${compYears() < 5 ? ' Tap a longer period above to widen it.' : ''} The price and range need at least 3.</div>` : '';
+  // A short window trades closeness for freshness: say so when recent sales are mostly further away
+  // while the street itself has older evidence (42 Silvertown Avenue, 6 months: other streets 0.5 mi off).
+  if (comps.length >= 3 && compYears() < 5) {
+    const avgMi = comps.reduce((t, c) => t + c.d, 0) / comps.length / 1.609;
+    const onSt = sub.st ? recentSales(5).filter((x) => x.h !== sub && x.h.st === sub.st && x.h.t === sub.t && x.h.sq).length : 0;
+    const inWin = comps.filter((c) => c.h.st === sub.st).length;
+    if (avgMi > 0.4 && onSt >= 2 && inWin === 0) fewNote += `<div class="notice warn">No sales on ${esc(sub.st)} in the ${winLabel.toLowerCase()}, so these are on other streets (about ${avgMi.toFixed(1)} miles away on average). There are ${onSt} older sales on ${esc(sub.st)} itself: compare with a longer period before you settle on a price.</div>`;
+  }
+  if (!comps.length) secs.push({ id: 'comps', title: 'Similar homes sold', html: winBtns + fewNote, text: '', on: false });
   if (comps.length) {
-    const html = `<ul class="val-list comps">${comps.map((c) => `<li><b>${esc(c.h.a)}</b> <small>${esc(c.h.pc)}</small><br>
+    const html = `${winBtns}${fewNote}<ul class="val-list comps">${comps.map((c) => `<li class="mk ${ageClass(c.date)}"><b>${esc(c.h.a)}</b> <small>${esc(c.h.pc)}</small><br>
       Sold ${esc(monthYear(c.date))} for ${money0(c.price)}${c.adj !== c.price ? ` · today ≈ ${money0(c.adj)}` : ''}<br>
       <small>${num0(c.h.sq)} sq ft · £${Math.round(ppsf(c))}/sq ft · ${esc(c.why.join(' · '))}</small><br>
       <a class="val-rm" href="https://www.rightmove.co.uk/house-prices/${esc(c.h.pc.toLowerCase().replace(/\s+/g, '-'))}.html" target="_blank" rel="noopener">Photos on Rightmove ↗</a></li>`).join('')}</ul>
-      ${comps.mixedBeds ? `<div class="notice warn">Fewer than 3 ${comps.mixedBeds === 6 ? '6+' : comps.mixedBeds}-bed sales nearby in 5 years, so the closest other sizes are shown too.</div>` : ''}
+      ${comps.mixedBeds ? `<div class="notice warn">Fewer than 3 ${comps.mixedBeds === 6 ? '6+' : comps.mixedBeds}-bed sales nearby in the ${esc(winLabel.toLowerCase())}, so the closest other sizes are shown too.</div>` : ''}
       <p class="hint">Rightmove links are just for you: they open Rightmove's sold prices for that postcode (photos from the old listing). They never go in the client's PDF or message.</p>
-      <p class="hint">"Today" adds the local price change since each sale (UK House Price Index).</p>`;
+      <p class="hint"><span class="mk-key g">sold in the last 6 months</span> <span class="mk-key a">6–12 months</span> <span class="mk-key x">over 12 months</span><br>"Today" adds the local price change since each sale (UK House Price Index), so older sales reflect where prices are now, up or down.</p>`;
     const text = comps.map((c) => `• ${c.h.a}: sold ${monthYear(c.date)} for ${money0(c.price)} (${num0(c.h.sq)} sq ft, £${Math.round(ppsf(c))} per sq ft in today's money)`).join('\n');
     const table = { cols: [{ h: 'ADDRESS', w: 0.38 }, { h: 'SOLD', w: 0.13 }, { h: 'PRICE', w: 0.15, right: true }, { h: 'TODAY', w: 0.13, right: true }, { h: 'SIZE', w: 0.11, right: true }, { h: '£/SQ FT', w: 0.10, right: true }],
       rows: comps.map((c) => ({ link: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.h.a + ', ' + c.h.pc), cells: [c.h.a, monthYear(c.date), money0(c.price), money0(c.adj), num0(c.h.sq) + ' sq ft', '£' + Math.round(ppsf(c))] })) };
-    secs.push({ id: 'comps', title: 'Similar homes sold', html, text, on: true, table, note: "Today = the sale price brought up to date with the local House Price Index. £/sq ft is in today's money." });
+    secs.push({ id: 'comps', title: 'Similar homes sold', html, text, on: true, table, note: `${winLabel === 'Older too (5 years)' ? 'Sales from the last 5 years' : 'Sales from the ' + winLabel.toLowerCase()}. Today = the sale price brought up to date with the local House Price Index. £/sq ft is in today's money.` });
   }
 
   // 3b. By bedrooms: on the street and within half a mile
@@ -614,6 +630,8 @@ function renderValueHome() {
     }
     rerender();
   });
+  const win = $('#v-win');
+  if (win) win.onclick = (e) => { const b = e.target.closest('button[data-y]'); if (b) { VAL.compYears = +b.dataset.y; VAL.myPrice = null; VAL.stOverride = null; rerender(); } };
   const mkr = $('#v-mkr');
   if (mkr) mkr.onclick = (e) => { const b = e.target.closest('button[data-r]'); if (b) { VAL.mkR = +b.dataset.r; rerender(); } };
   const mkt = $('#v-mkt');
@@ -747,8 +765,8 @@ async function openValueShare() {
     </details>
     <label for="v-to">Their email (optional, for Email it)</label>
     <input type="text" id="v-to" inputmode="email" autocomplete="off" placeholder="name@example.com">
-    <div class="stack"><button class="btn pri big" id="v-pdf" type="button">Send PDF (Aircall, WhatsApp…)</button><button class="btn" id="v-mail" type="button">Email it</button><button class="btn" id="v-pdf-view" type="button">Preview the PDF</button></div>
-    <p class="hint">Send PDF opens your phone's share menu: pick Aircall if it's there, otherwise WhatsApp.</p>
+    <div class="stack"><button class="btn pri big" id="v-pdf" type="button">Share PDF (WhatsApp, Outlook…)</button><button class="btn" id="v-mail" type="button">Email it</button><button class="btn" id="v-pdf-view" type="button">Preview the PDF</button></div>
+    <p class="hint">Share PDF opens your phone's share menu: pick WhatsApp, or your work Outlook to email it. Aircall can't take PDFs.</p>
     <details><summary>Or send it as a WhatsApp message</summary>
     <label for="v-preview">Message (you can edit it)</label>
     <textarea id="v-preview" rows="10"></textarea>
@@ -797,7 +815,7 @@ async function openValueShare() {
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = pdfName(); document.body.appendChild(a); a.click(); a.remove();
-    toast('PDF saved to Downloads. Attach it in Aircall or WhatsApp.');
+    toast('PDF saved to Downloads. Attach it in WhatsApp or Outlook.');
     await logSent('download');
   };
   refresh();
