@@ -143,6 +143,25 @@ function searchHomes(q) {
   return out.sort((a, b) => a.a.localeCompare(b.a, 'en', { numeric: true })).slice(0, 25);
 }
 
+// "77 Prospect Avenue" with no record: same street, nearest house numbers (same side first) give the
+// postcode, type and a size estimate. Clearly marked as estimated; the lister can correct it.
+function virtualHome(q) {
+  const m = /^\s*(\d+)([a-z]?)\s+(.+?)\s*$/i.exec(String(q).replace(/,/g, ' ').replace(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i, ''));
+  if (!m) return null;
+  const num = +m[1], words = m[3].toLowerCase().split(/\s+/).filter(Boolean);
+  const onSt = VAL.homes.filter((h) => h.st && words.every((w) => h.st.toLowerCase().includes(w)) && /^\d+/.test(h.a) && !/^flat/i.test(h.a));
+  if (!onSt.length) return null;
+  const st = onSt[0].st;
+  if (onSt.some((h) => parseInt(h.a, 10) === num && !m[2])) return null; // it exists after all
+  const near = onSt.filter((h) => h.st === st).map((h) => ({ h, gap: Math.abs(parseInt(h.a, 10) - num) + ((parseInt(h.a, 10) - num) % 2 ? 2.5 : 0) }))
+    .sort((a, b) => a.gap - b.gap).slice(0, 4).map((x) => x.h);
+  const vote = (f) => { const c = {}; for (const h of near) if (h[f]) c[h[f]] = (c[h[f]] || 0) + 1; return Object.keys(c).sort((a, b) => c[b] - c[a])[0]; };
+  const sizes = near.filter((h) => h.sq).map((h) => h.sq);
+  const sq = sizes.length ? Math.round(quant(sizes, 0.5)) : null;
+  return { a: `${num}${m[2] || ''} ${st}`, pc: vote('pc'), st, t: vote('t'), sq, m2: sq ? Math.round(sq / SQ_M) : null, virtual: true,
+    from: near.slice(0, 2).map((h) => h.a), i: -1, key: '' };
+}
+
 /* ---------------- The evidence ---------------- */
 function recentSales(years) {
   const since = new Date(new Date(VAL.pack.built).getTime() - years * YEAR_MS).toISOString().slice(0, 10);
@@ -346,12 +365,13 @@ function buildSections(sub) {
     const sbd = bedsOf(sub);
     if (sbd && !sbd.guess) bits.push(`${sbd.n === 6 ? '6+' : sbd.n} bedrooms`);
     if (sub.dw || sub.t) bits.push(sub.dw || TYPE_WORD[sub.t]);
-    if (sub.sq) bits.push(`${sub.sq.toLocaleString('en-GB')} sq ft (${Math.round(sub.m2)} m²) on its EPC (${monthYear(sub.d)})`);
+    if (sub.sq) bits.push(sub.virtual ? `${sub.sq.toLocaleString('en-GB')} sq ft (${Math.round(sub.m2)} m²) ${sub.measured ? 'as measured' : 'estimated from its neighbours'}` : `${sub.sq.toLocaleString('en-GB')} sq ft (${Math.round(sub.m2)} m²) on its EPC (${monthYear(sub.d)})`);
     if (sub.b) bits.push(`energy rating ${sub.b}${sub.p && sub.p !== sub.b ? `, could reach ${sub.p}` : ''}`);
     if (sub.ag) bits.push(`built ${ageWord(sub.ag)}`);
     if (sub.ex) bits.push(`${sub.ex} extension${sub.ex > 1 ? 's' : ''} recorded`);
     if (bits.length) bits[0] = bits[0].charAt(0).toUpperCase() + bits[0].slice(1);
-    const html = bits.length ? `<p>${bits.map(esc).join(' · ')}</p>${!sub.sq ? '<p class="hint">No floor area on the EPC register. Measure it to get a £ per sq ft figure.</p>' : sub.d && sub.d < '2015' ? '<p class="hint">The EPC is over 10 years old, so check for extensions since.</p>' : ''}` : '<p class="hint">Nothing on the EPC register for this home.</p>';
+    const vnote = sub.virtual ? `<p class="val-nod">ⓘ Not on the public records: no sale since 1995 and no EPC. Type and size come from its neighbours (${esc(sub.from.join(' and '))}). Correct the type here, and measure the whole house below to replace the size.</p><div class="seg" id="v-vtype" role="group" aria-label="Type">${['terraced', 'semi', 'detached', 'flat'].map((t) => `<button type="button" data-t="${t}" aria-pressed="${sub.t === t}">${t === 'semi' ? 'Semi' : t.charAt(0).toUpperCase() + t.slice(1)}</button>`).join('')}</div>` : '';
+    const html = vnote + (bits.length ? `<p>${bits.map(esc).join(' · ')}</p>${sub.virtual ? '' : !sub.sq ? '<p class="hint">No floor area on the EPC register. Measure it to get a £ per sq ft figure.</p>' : sub.d && sub.d < '2015' ? '<p class="hint">The EPC is over 10 years old, so check for extensions since.</p>' : ''}` : '<p class="hint">Nothing on the EPC register for this home.</p>');
     secs.push({ id: 'home', title: 'Your home', html, text: bits.length ? bits.join(' · ') : '', on: true });
   }
 
@@ -506,11 +526,12 @@ async function renderValue() {
   const show = () => {
     VAL.query = $('#v-q').value;
     const res = searchHomes(VAL.query);
-    $('#v-res').innerHTML = res.map((h) => `<li data-i="${h.i}"><div class="stop-body"><b>${esc(h.a)}</b><small>${esc(h.pc)}${h.sq ? ` · ${num0(h.sq)} sq ft` : ''}${h.s ? ` · last sold ${esc(monthYear(h.s[h.s.length - 1][0]))}` : ''}</small></div></li>`).join('')
-      || (VAL.query.trim().length > 2 ? '<li><div class="stop-body"><small>No match. Try just the number and street, or the postcode.</small></div></li>' : '');
+    VAL.virtual = res.length ? null : virtualHome(VAL.query);
+    $('#v-res').innerHTML = (VAL.virtual ? `<li data-v="1"><div class="stop-body"><b>${esc(VAL.virtual.a)}</b><small>Not on the public records (no sale since 1995, no EPC). Tap to appraise it from its neighbours (${esc(VAL.virtual.from.join(' and '))}).</small></div></li>` : '') + res.map((h) => `<li data-i="${h.i}"><div class="stop-body"><b>${esc(h.a)}</b><small>${esc(h.pc)}${h.sq ? ` · ${num0(h.sq)} sq ft` : ''}${h.s ? ` · last sold ${esc(monthYear(h.s[h.s.length - 1][0]))}` : ''}</small></div></li>`).join('')
+      || (VAL.virtual ? '' : VAL.query.trim().length > 2 ? '<li><div class="stop-body"><small>No match. Try just the number and street, or the postcode.</small></div></li>' : '');
   };
   $('#v-q').addEventListener('input', show);
-  $('#v-res').onclick = (e) => { const li = e.target.closest('li[data-i]'); if (li) { VAL.home = VAL.homes[+li.dataset.i]; VAL.adds = []; VAL.whole = ''; VAL.myPrice = null; VAL.stOverride = null; VAL.finalPrice = null; VAL.cond = 'avg'; go('value'); } };
+  $('#v-res').onclick = (e) => { const li = e.target.closest('li[data-i], li[data-v]'); if (li) { VAL.home = li.dataset.v ? VAL.virtual : VAL.homes[+li.dataset.i]; VAL.adds = []; VAL.whole = ''; VAL.myPrice = null; VAL.stOverride = null; VAL.finalPrice = null; VAL.cond = 'avg'; go('value'); } };
   show();
   if (!VAL.query) $('#v-q').focus();
 }
@@ -599,6 +620,11 @@ function renderValueHome() {
       : `That's no bigger than the EPC's ${num0(sub.sq)} sq ft.`;
   };
   $('#v-whole').addEventListener('input', wholeOut);
+  if (sub.virtual) {
+    $('#v-whole').addEventListener('change', () => { const v = toSqft($('#v-whole').value); if (v) { sub.sq = Math.round(v); sub.m2 = Math.round(v / SQ_M); sub.measured = true; sub._sizeBeds = undefined; VAL.whole = ''; VAL.rate = null; rerender(); } });
+    const vt = $('#v-vtype');
+    if (vt) vt.onclick = (e) => { const b = e.target.closest('button[data-t]'); if (b) { sub.t = b.dataset.t; sub._sizeBeds = undefined; VAL.rate = null; rerender(); } };
+  }
   wholeOut();
   $('#v-add').onclick = () => {
     VAL.adds.push({ kind: 'ext1', size: '', status: 'new', override: null });
