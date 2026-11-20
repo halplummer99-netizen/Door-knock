@@ -765,12 +765,18 @@ async function openValueShare() {
     </details>
     <label for="v-to">Their email (optional, for Email it)</label>
     <input type="text" id="v-to" inputmode="email" autocomplete="off" placeholder="name@example.com">
+    <label for="v-who">Their first name (for the follow-up text)</label>
+    <input type="text" id="v-who" autocomplete="off" placeholder="e.g. Sarah" value="${esc(VAL.clientName || '')}">
     <div class="stack"><button class="btn pri big" id="v-pdf" type="button">Share PDF (WhatsApp, Outlook…)</button><button class="btn" id="v-mail" type="button">Email it</button><button class="btn" id="v-pdf-view" type="button">Preview the PDF</button></div>
     <p class="hint">Share PDF opens your phone's share menu: pick WhatsApp, or your work Outlook to email it. Aircall can't take PDFs.</p>
     <details><summary>Or send it as a WhatsApp message</summary>
     <label for="v-preview">Message (you can edit it)</label>
     <textarea id="v-preview" rows="10"></textarea>
     <div class="row"><button class="btn" id="v-send" type="button">Send message…</button><button class="btn" id="v-copy" type="button">Copy</button></div></details>
+    <h3>Follow-up text (send through Aircall)</h3>
+    <p class="hint">Aircall can't be filled in by another app, so copy this, then in Aircall start a text to them and paste.</p>
+    <textarea id="v-fu" rows="6"></textarea>
+    <div class="stack"><button class="btn pri" id="v-fu-copy" type="button">Copy for Aircall</button></div>
     <div class="stack"><button class="btn" id="v-close" type="button">Close</button></div>
   </div>`;
   document.body.appendChild(back);
@@ -787,6 +793,11 @@ async function openValueShare() {
     window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener');
   };
   const saveC = () => saveContact({ phone: back.querySelector('#v-c-phone').value.trim(), email: back.querySelector('#v-c-email').value.trim(), reviews: back.querySelector('#v-c-rev').value.trim() });
+  const fu = back.querySelector('#v-fu');
+  const fuRefresh = () => { VAL.clientName = back.querySelector('#v-who').value.trim(); fu.value = followUpText(VAL.home, VAL.clientName, VAL.lastVia || ''); };
+  back.querySelector('#v-who').addEventListener('input', fuRefresh);
+  back.querySelector('#v-fu-copy').onclick = async () => { try { await navigator.clipboard.writeText(fu.value); toast('Copied: open Aircall, start a text to them and paste', null, 5000); } catch (e) { fu.select(); toast('Select all and copy'); } };
+  fuRefresh();
   const makePdf = async () => { await saveC(); VAL.pdfNote = back.querySelector('#v-note').value.trim(); return PDFX.build(pdfData(ticks, VAL.pdfNote)); };
   const subject = () => `Your market appraisal: ${VAL.home.a}`;
   const body = () => `Hello,\n\nAs promised, here is the market appraisal for ${VAL.home.a}, with the local evidence we talked about. Any questions, just reply or give me a call.\n\n${S.settings.name || ''}\nGriffin`;
@@ -797,11 +808,11 @@ async function openValueShare() {
     if (to) { try { await navigator.clipboard.writeText(to); } catch (e) { /* not allowed: they can type it */ } }
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       if (to) toast(`${to} is copied: pick Gmail or Outlook, then paste it into To`, null, 6000);
-      try { await navigator.share({ files: [file], title: subject(), text: body() }); await logSent('email', to); toast('Logged. Follow-up reminder in 3 days.'); return; } catch (e) { if (e.name === 'AbortError') return; }
+      try { await navigator.share({ files: [file], title: subject(), text: body() }); VAL.lastVia = 'email'; fuRefresh(); await logSent('email', to, VAL.clientName); toast('Logged. Follow-up reminder in 3 days.'); return; } catch (e) { if (e.name === 'AbortError') return; }
     }
     location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(body() + '\n\n(PDF saved to your Downloads: attach it)')}`;
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = pdfName(); document.body.appendChild(a); a.click(); a.remove();
-    await logSent('email', to);
+    VAL.lastVia = 'email'; fuRefresh(); await logSent('email', to, VAL.clientName);
   };
   back.querySelector('#v-pdf-view').onclick = async () => {
     const url = URL.createObjectURL(await makePdf());
@@ -811,12 +822,12 @@ async function openValueShare() {
     const blob = await makePdf();
     const file = new File([blob], pdfName(), { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: pdfName().replace(/\.pdf$/, '') }); await logSent('share menu'); toast('Logged. Follow-up reminder in 3 days.'); return; } catch (e) { if (e.name === 'AbortError') return; }
+      try { await navigator.share({ files: [file], title: pdfName().replace(/\.pdf$/, '') }); fuRefresh(); await logSent('share menu', '', VAL.clientName); toast('Logged. Follow-up reminder in 3 days.'); return; } catch (e) { if (e.name === 'AbortError') return; }
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = pdfName(); document.body.appendChild(a); a.click(); a.remove();
     toast('PDF saved to Downloads. Attach it in WhatsApp or Outlook.');
-    await logSent('download');
+    await logSent('download', '', VAL.clientName);
   };
   refresh();
 }

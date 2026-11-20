@@ -200,12 +200,18 @@ function instructButton() {
 }
 
 /* ---------------- Sent appraisals and follow-ups ---------------- */
-async function logSent(via, to) {
+// The follow-up text that goes through Aircall after the PDF is sent.
+function followUpText(home, name, via) {
+  const me = (S.settings.name || '').split(' ')[0];
+  const how = via === 'email' ? 'by email' : via === 'WhatsApp' ? 'on WhatsApp' : '';
+  return `Hi${name ? ' ' + name : ''}, it's ${me || 'your agent'} from Griffin. I've just sent your market appraisal for ${home.a}${how ? ' ' + how : ''}. My contact details are on it, with buttons you can tap to call or text me, and one to instruct Griffin to sell your home whenever you're ready. Any questions, or if it won't open, just let me know. ${me ? me + ', ' : ''}Griffin`;
+}
+async function logSent(via, to, name) {
   const list = (await DB.get('kv', 'apprSent')) || [];
   const st = VAL.finalPrice ? strategyText(currentStrategy(VAL.finalPrice)) : '';
   const at = new Date();
   const due = new Date(at.getTime() + 3 * 86400000);
-  list.unshift({ id: uid(), a: VAL.home.a, pc: VAL.home.pc, to: to || '', via, at: at.toISOString(), due: localDate(due), strategy: st, done: false });
+  list.unshift({ id: uid(), a: VAL.home.a, pc: VAL.home.pc, to: to || '', name: name || '', via, at: at.toISOString(), due: localDate(due), strategy: st, done: false });
   await DB.put('kv', list.slice(0, 300), 'apprSent');
 }
 async function sentListHtml() {
@@ -215,7 +221,7 @@ async function sentListHtml() {
   return `<section class="val-sec"><h3>Sent appraisals: follow up</h3><ul class="val-list comps" id="v-sent">${list.slice(0, 20).map((x) => `<li data-id="${x.id}">
     <b>${esc(x.a)}</b> <small>${esc(x.pc)}</small>${x.due <= today ? ' <span class="flag bad">Follow up due</span>' : ''}<br>
     <small>Sent ${esc(prettyDate(x.at))} by ${esc(x.via)}${x.to ? ' to ' + esc(x.to) : ''}${x.strategy ? ' · ' + esc(x.strategy) : ''} · follow up ${esc(prettyDate(x.due))}</small><br>
-    <button type="button" class="btn small" data-a="open">Open</button> <button type="button" class="btn small" data-a="done">Followed up ✓</button></li>`).join('')}</ul></section>`;
+    <button type="button" class="btn small" data-a="open">Open</button> <button type="button" class="btn small" data-a="text">Copy follow-up text</button> <button type="button" class="btn small" data-a="done">Followed up ✓</button></li>`).join('')}</ul></section>`;
 }
 function wireSentList() {
   const el = $('#v-sent'); if (!el) return;
@@ -226,5 +232,9 @@ function wireSentList() {
     const x = list.find((y) => y.id === id); if (!x) return;
     if (b.dataset.a === 'done') { x.done = true; await DB.put('kv', list, 'apprSent'); renderValue(); }
     if (b.dataset.a === 'open') openValueFor(x.a, x.pc);
+    if (b.dataset.a === 'text') {
+      const t = followUpText({ a: x.a }, x.name, x.via === 'email' ? 'email' : '');
+      try { await navigator.clipboard.writeText(t); toast('Copied: open Aircall, start a text to them and paste', null, 5000); } catch (e) { toast('Could not copy on this phone'); }
+    }
   };
 }
