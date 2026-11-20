@@ -131,7 +131,7 @@ const PDFX = (() => {
       for (const b of btns) {
         const bw = width(clean(b.label), 9.5, true) + 26;
         if (x + bw > W - M) { x = M; d.y -= bh + gap; }
-        d.rect(x, d.y - bh, bw, bh, b.label.startsWith('Read') ? RED : NAVY);
+        d.rect(x, d.y - bh, bw, bh, NAVY);
         d.text(x + bw / 2, d.y - bh + 8.5, b.label, 9.5, { bold: true, c: [1, 1, 1], align: 'center' });
         d.link(x, d.y - bh, bw, bh, b.url);
         x += bw + gap;
@@ -231,6 +231,15 @@ const PDFX = (() => {
       d.y -= th + 22;
     }
 
+    function bigButton(b) {
+      const bh = 40;
+      need(bh + 14);
+      d.rect(M, d.y - bh, W - 2 * M, bh, RED);
+      d.text(W / 2, d.y - bh / 2 - 5, b.label, 15, { bold: true, c: [1, 1, 1], align: 'center' });
+      d.link(M, d.y - bh, W - 2 * M, bh, b.url);
+      d.y -= bh + 20;
+    }
+    if (data.instruct) bigButton(data.instruct);
     for (const s of data.sections) {
       need(48);
       d.text(M, d.y, s.title, 13, { bold: true, c: NAVY }); d.y -= 6;
@@ -269,6 +278,7 @@ const PDFX = (() => {
       d.y -= 14;
     }
 
+    if (data.instruct) { need(120); d.text(M, d.y, 'Ready to go ahead?', 13, { bold: true, c: NAVY }); d.y -= 6; d.rect(M, d.y, 36, 2.5, RED); d.y -= 14; bigButton(data.instruct); }
     if (data.buttons && data.buttons.length) { need(70); d.text(M, d.y, 'Any questions? Get in touch', 13, { bold: true, c: NAVY }); d.y -= 6; d.rect(M, d.y, 36, 2.5, RED); d.y -= 14; buttonRow(data.buttons); }
     const footLines = wrap(data.disclaimer, 7, false, W - 2 * M - 140);
     const footer = (p, n) => {

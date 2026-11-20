@@ -190,6 +190,14 @@ function contactButtons() {
   if (c.reviews) b.push({ label: 'Read our Google reviews', url: c.reviews });
   return b;
 }
+// The client's "go ahead" button: an email to the lister, already written for them.
+function instructButton() {
+  const c = VAL.contact || CONTACT_DEFAULTS;
+  if (!c.email) return null;
+  const first = (S.settings.name || '').split(' ')[0];
+  const body = `Hello${first ? ' ' + first : ''},\n\nThank you for the market appraisal for ${VAL.home.a}, ${VAL.home.pc}.\n\nWe would like to go ahead and instruct Griffin to sell our home. Please get in touch to arrange the next steps, including the photos and floorplan.\n\nThe best number to reach us on is: \nThe best times to call are: \n\nKind regards,\n`;
+  return { label: 'Instruct Griffin to sell my home', url: `mailto:${c.email}?subject=${encodeURIComponent('Instructing Griffin: ' + VAL.home.a)}&body=${encodeURIComponent(body)}`, big: true };
+}
 
 /* ---------------- Sent appraisals and follow-ups ---------------- */
 async function logSent(via, to) {
