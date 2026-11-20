@@ -49,10 +49,15 @@ function priceModel(sub) {
   for (const c of CONDITIONS) {
     let v = (c.k === 'reno' ? Math.min(quant(vals, c.q), mid * 0.9) : c.k === 'high' ? Math.max(quant(vals, c.q), mid * 1.05) : mid) + extra;
     let capped = false;
-    if (c.k === 'high' && C && v > C.best.adj) { v = C.best.adj; capped = true; }
+    // Hold high spec at the street's best sale, but never below average condition: on a street whose best
+    // sale is under the evidence (11 Alderman Walk: £386k against £425k), the cap would turn the order upside down.
+    if (c.k === 'high' && C && v > C.best.adj && C.best.adj > out.avg.v) { v = C.best.adj; capped = true; }
     out[c.k] = { v: k5(v), capped };
   }
-  return { by: out, n: comps.length, extra, ceiling: C };
+  // Always cheapest to dearest: renovation <= average <= high spec.
+  out.reno.v = Math.min(out.reno.v, out.avg.v);
+  out.high.v = Math.max(out.high.v, out.avg.v);
+  return { by: out, n: comps.length, extra, ceiling: C, ceilingLow: !!(C && C.best.adj < out.avg.v) };
 }
 
 function strategyFigures(kind, p) {
@@ -127,7 +132,7 @@ function priceInputs(sub, M) {
   const st = price ? currentStrategy(price) : null;
   const comp = st && VAL.pack.market && VAL.pack.market.length ? competition(sub, ladder(portalPrice(st), price)) : [];
   return `
-    ${sug ? `<p>Our suggested price: <b class="val-big">${money0(sug.v)}</b><br><small>${esc(CONDITIONS.find((c) => c.k === VAL.cond).word)}: from ${M.n} comparable sales adjusted for size${M.extra ? `, plus ${money0(M.extra)} agreed extra space` : ''}${sug.capped ? `, held at the street ceiling (${money0(M.ceiling.best.adj)})` : ''}.</small></p>` : ''}
+    ${sug ? `<p>Our suggested price: <b class="val-big">${money0(sug.v)}</b><br><small>${esc(CONDITIONS.find((c) => c.k === VAL.cond).word)}: from ${M.n} comparable sales adjusted for size${M.extra ? `, plus ${money0(M.extra)} agreed extra space` : ''}${sug.capped ? `, held at the street ceiling (${money0(M.ceiling.best.adj)})` : ''}.</small></p>${M.ceilingLow ? `<div class="notice warn">The best sale on ${esc(sub.st || 'this street')} in 10 years (${money0(M.ceiling.best.adj)} in today's money) is below what the comparables suggest. Either this road sells for less than the streets around it, or there's been no good sale here for a while: check the comparables before settling on a price.</div>` : ''}` : ''}
     <label for="v-myprice">Your price${VAL.myPrice != null ? ' (your figure)' : ''}</label>
     <div class="fee-row"><div class="fee-input"><span>£</span><input type="text" id="v-myprice" inputmode="numeric" autocomplete="off" placeholder="Your figure" value="${price ? esc(price.toLocaleString('en-GB')) : ''}"></div>${VAL.myPrice != null ? '<button type="button" class="btn small" id="v-myprice-reset">Use ours</button>' : ''}</div>
     ${st ? `
