@@ -366,14 +366,14 @@ function buildSections(sub) {
   const comps = comparables(sub);
   const winLabel = COMP_WINDOWS.find((w) => w.y === compYears()).label;
   const winBtns = `<div class="seg val-win" id="v-win" role="group" aria-label="How recent">${COMP_WINDOWS.map((w) => `<button type="button" data-y="${w.y}" aria-pressed="${compYears() === w.y}">${w.label.replace(' (5 years)', '')}</button>`).join('')}</div>`;
-  let fewNote = comps.length < 3 ? `<div class="notice warn">Only ${comps.length} similar sale${comps.length === 1 ? '' : 's'} in the ${winLabel.toLowerCase()}.${compYears() < 5 ? ' Tap a longer period above to widen it.' : ''} The price and range need at least 3.</div>` : '';
+  let fewNote = comps.length < 3 ? `<p class="val-nod">ⓘ Limited evidence: only ${comps.length} similar sale${comps.length === 1 ? '' : 's'} in the ${winLabel.toLowerCase()}.${compYears() < 5 ? ' A longer period above will find more.' : ''}</p>` : '';
   // A short window trades closeness for freshness: say so when recent sales are mostly further away
   // while the street itself has older evidence (42 Silvertown Avenue, 6 months: other streets 0.5 mi off).
   if (comps.length >= 3 && compYears() < 5) {
     const avgMi = comps.reduce((t, c) => t + c.d, 0) / comps.length / 1.609;
     const onSt = sub.st ? recentSales(5).filter((x) => x.h !== sub && x.h.st === sub.st && x.h.t === sub.t && x.h.sq).length : 0;
     const inWin = comps.filter((c) => c.h.st === sub.st).length;
-    if (avgMi > 0.4 && onSt >= 2 && inWin === 0) fewNote += `<div class="notice warn">No sales on ${esc(sub.st)} in the ${winLabel.toLowerCase()}, so these are on other streets (about ${avgMi.toFixed(1)} miles away on average). There are ${onSt} older sales on ${esc(sub.st)} itself: compare with a longer period before you settle on a price.</div>`;
+    if (avgMi > 0.4 && onSt >= 2 && inWin === 0) fewNote += `<p class="val-nod">ⓘ Limited evidence: nothing sold on ${esc(sub.st)} in the ${winLabel.toLowerCase()}, so these are from nearby streets. ${esc(sub.st)} has ${onSt} older sales, worth a look with a longer period.</p>`;
   }
   if (!comps.length) secs.push({ id: 'comps', title: 'Similar homes sold', html: winBtns + fewNote, text: '', on: false });
   if (comps.length) {
@@ -381,7 +381,7 @@ function buildSections(sub) {
       Sold ${esc(monthYear(c.date))} for ${money0(c.price)}${c.adj !== c.price ? ` · today ≈ ${money0(c.adj)}` : ''}<br>
       <small>${num0(c.h.sq)} sq ft · £${Math.round(ppsf(c))}/sq ft · ${esc(c.why.join(' · '))}</small><br>
       <a class="val-rm" href="https://www.rightmove.co.uk/house-prices/${esc(c.h.pc.toLowerCase().replace(/\s+/g, '-'))}.html" target="_blank" rel="noopener">Photos on Rightmove ↗</a></li>`).join('')}</ul>
-      ${comps.mixedBeds ? `<div class="notice warn">Fewer than 3 ${comps.mixedBeds === 6 ? '6+' : comps.mixedBeds}-bed sales nearby in the ${esc(winLabel.toLowerCase())}, so the closest other sizes are shown too.</div>` : ''}
+      ${comps.mixedBeds ? `<p class="val-nod">ⓘ Limited evidence: fewer than 3 ${comps.mixedBeds === 6 ? '6+' : comps.mixedBeds}-bed sales nearby, so some other sizes are included.</p>` : ''}
       <p class="hint">Rightmove links are just for you: they open Rightmove's sold prices for that postcode (photos from the old listing). They never go in the client's PDF or message.</p>
       <p class="hint"><span class="mk-key g">sold in the last 6 months</span> <span class="mk-key a">6–12 months</span> <span class="mk-key x">over 12 months</span><br>"Today" adds the local price change since each sale (UK House Price Index), so older sales reflect where prices are now, up or down.</p>`;
     const text = comps.map((c) => `• ${c.h.a}: sold ${monthYear(c.date)} for ${money0(c.price)} (${num0(c.h.sq)} sq ft, £${Math.round(ppsf(c))} per sq ft in today's money)`).join('\n');
@@ -436,7 +436,7 @@ function buildSections(sub) {
   VAL.range = rng;
   if (rng) {
     const line = `${money0(rng.lo)} – ${money0(rng.hi)}`;
-    secs.push({ id: 'range', title: 'What the evidence says', html: `<p class="val-big">${esc(line)}</p><p class="hint">${esc(rng.basis)}. A starting point before condition, layout, garden and parking.</p>${rng.hi > rng.lo * 1.2 ? '<div class="notice warn">Wide range: the sales here are mixed, so lean on your own judgement and the closest comparables.</div>' : ''}`, text: `Based on the evidence above: ${line}, before condition, layout, garden and parking.`, on: true });
+    secs.push({ id: 'range', title: 'What the evidence says', html: `<p class="val-big">${esc(line)}</p><p class="hint">${esc(rng.basis)}. A starting point before condition, layout, garden and parking.</p>${rng.hi > rng.lo * 1.2 ? '<p class="val-nod">ⓘ Wide range: the sales here are mixed, so the closest comparables matter most.</p>' : ''}`, text: `Based on the evidence above: ${line}, before condition, layout, garden and parking.`, on: true });
   }
 
   // 6. Extra space the lister measured and agreed
@@ -692,11 +692,14 @@ function ceilingInfo(sub) {
 }
 function ceilingHtml(C, R, total) {
   if (!C) return '';
-  const over = R && R.hi + (total || 0) > C.best.adj;
+  // A street whose best sale sits below the evidence itself (11 Alderman Walk) has thin data, not a hard
+  // limit: plain box and a gentle line rather than amber.
+  const thin = R && C.best.adj < (R.lo + R.hi) / 2;
+  const over = !thin && R && R.hi + (total || 0) > C.best.adj;
   return `<div class="notice ${over ? 'warn' : 'info'} val-ceiling"><b>Ceiling for ${esc(VAL.home.st)}: about ${money0(C.best.adj)}</b><br>
     Best sale on the road in 10 years: ${esc(C.best.h.a)}, ${money0(C.best.price)} in ${esc(monthYear(C.best.date))} (≈ ${money0(C.best.adj)} today)${C.bestSame && C.bestSame !== C.best ? `. Best ${esc(TYPE_WORD[VAL.home.t] || 'similar')} home: ${esc(C.bestSame.h.a)}, ≈ ${money0(C.bestSame.adj)} today` : ''}${C.bestBeds && C.bestBeds !== C.best ? `. Best ${C.beds.n}-bed: ${esc(C.bestBeds.h.a)}, ≈ ${money0(C.bestBeds.adj)} today` : ''}.
     ${C.topAsk ? `<br>Dearest similar home for sale nearby: ${esc(C.topAsk.a)}, asking ${money0(C.topAsk.price)} (${esc(C.topAsk.agent)}).` : ''}
-    <br><small>Why it matters: buyers compare with what's sold on the road, and their surveyors check the price against the same sales, so it's hard to sell much above the best one however much has been spent.${over ? ' Your top figure is above it.' : ''}</small></div>`;
+    <br><small>Why it matters: buyers compare with what's sold on the road, and their surveyors check the price against the same sales, so it's hard to sell much above the best one however much has been spent.${over ? ' Your top figure is above it.' : ''}${thin ? ' Here the road\'s best sale is below the evidence, so treat it as a guide rather than a limit.' : ''}</small></div>`;
 }
 
 /* ---------------- Share with the owner (tick what goes in) ---------------- */
