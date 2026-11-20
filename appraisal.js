@@ -59,7 +59,26 @@ function bedsOf(h) {
   if (h.bd) return { n: Math.min(h.bd, 6), src: 'Sprift' };
   if (h.r) return { n: Math.min(h.t === 'flat' ? Math.max(1, h.r - 1) : (HOUSE_BEDS[h.r] || 5), 6), src: 'EPC rooms', guess: true };
   if (h === VAL.home && h.sq) return sizeGuess(h);
+  if (h.sq && h.t) return areaGuess(h);
   return null;
+}
+// Other homes with no room count (new-build EPCs): the bedroom count whose SS17 homes of the same type are
+// closest in size. Worked out once per pack.
+function areaGuess(h) {
+  if (!VAL.bedSizes) {
+    const by = {};
+    for (const x of VAL.homes) {
+      if (!x.sq || !x.t || (!x.r && !x.bd)) continue;
+      const n = x.bd ? Math.min(x.bd, 6) : Math.min(x.t === 'flat' ? Math.max(1, x.r - 1) : (HOUSE_BEDS[x.r] || 5), 6);
+      ((by[x.t] = by[x.t] || {})[n] = by[x.t][n] || []).push(x.sq);
+    }
+    VAL.bedSizes = {};
+    for (const [t, m] of Object.entries(by)) VAL.bedSizes[t] = Object.entries(m).filter(([, v]) => v.length >= 10).map(([n, v]) => ({ n: +n, med: quant(v, 0.5) }));
+  }
+  const opts = VAL.bedSizes[h.t] || [];
+  if (!opts.length) return null;
+  const best = opts.reduce((b, o) => (Math.abs(o.med - h.sq) < Math.abs(b.med - h.sq) ? o : b));
+  return { n: best.n, src: 'size', guess: true };
 }
 // No room count (common on new builds): pick the bedroom count whose nearby homes are closest in size.
 function sizeGuess(h) {
@@ -92,6 +111,7 @@ async function loadPack() {
 }
 function setPack(p) {
   VAL.pack = p;
+  VAL.bedSizes = null;
   VAL.mkIndex = null;
   VAL.homes = p.homes.map((h, i) => ({ ...h, t: h.t || (/^(flat|apartment)\b/i.test(h.a) ? 'flat' : undefined), i, key: (h.a + ' ' + h.pc + ' ' + (h.pc || '').replace(/\s/g, '')).toLowerCase() }));
   VAL.home = null;
@@ -163,7 +183,18 @@ function comparables(sub) {
   }
   // One sale per home (its latest), best first.
   const seen = new Set();
-  return cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.h) ? false : seen.add(c.h))).slice(0, 6);
+  const ranked = cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.h) ? false : seen.add(c.h)));
+  // Bedrooms the lister confirmed (or Sprift's exact count) are a rule, not a nudge: same-bedroom sales only,
+  // topped up with the nearest other sizes only when there are fewer than 3 (and flagged on screen).
+  if (sb && !sb.guess) {
+    const same = ranked.filter((c) => { const b = bedsOf(c.h); return b && b.n === sb.n && c.d <= 2.4; });
+    if (same.length >= 3) return same.slice(0, 6);
+    const rest = ranked.filter((c) => !same.includes(c)).slice(0, 6 - same.length);
+    const out = same.concat(rest);
+    out.mixedBeds = sb.n;
+    return out;
+  }
+  return ranked.slice(0, 6);
 }
 
 function streetFigure(sub) {
@@ -332,7 +363,10 @@ function buildSections(sub) {
   if (comps.length) {
     const html = `<ul class="val-list comps">${comps.map((c) => `<li><b>${esc(c.h.a)}</b> <small>${esc(c.h.pc)}</small><br>
       Sold ${esc(monthYear(c.date))} for ${money0(c.price)}${c.adj !== c.price ? ` · today ≈ ${money0(c.adj)}` : ''}<br>
-      <small>${num0(c.h.sq)} sq ft · £${Math.round(ppsf(c))}/sq ft · ${esc(c.why.join(' · '))}</small></li>`).join('')}</ul>
+      <small>${num0(c.h.sq)} sq ft · £${Math.round(ppsf(c))}/sq ft · ${esc(c.why.join(' · '))}</small><br>
+      <a class="val-rm" href="https://www.rightmove.co.uk/house-prices/${esc(c.h.pc.toLowerCase().replace(/\s+/g, '-'))}.html" target="_blank" rel="noopener">Photos on Rightmove ↗</a></li>`).join('')}</ul>
+      ${comps.mixedBeds ? `<div class="notice warn">Fewer than 3 ${comps.mixedBeds === 6 ? '6+' : comps.mixedBeds}-bed sales nearby in 5 years, so the closest other sizes are shown too.</div>` : ''}
+      <p class="hint">Rightmove links are just for you: they open Rightmove's sold prices for that postcode (photos from the old listing). They never go in the client's PDF or message.</p>
       <p class="hint">"Today" adds the local price change since each sale (UK House Price Index).</p>`;
     const text = comps.map((c) => `• ${c.h.a}: sold ${monthYear(c.date)} for ${money0(c.price)} (${num0(c.h.sq)} sq ft, £${Math.round(ppsf(c))} per sq ft in today's money)`).join('\n');
     const table = { cols: [{ h: 'ADDRESS', w: 0.38 }, { h: 'SOLD', w: 0.13 }, { h: 'PRICE', w: 0.15, right: true }, { h: 'TODAY', w: 0.13, right: true }, { h: 'SIZE', w: 0.11, right: true }, { h: '£/SQ FT', w: 0.10, right: true }],
@@ -489,7 +523,8 @@ function renderValueHome() {
     const done = it.status === 'agreed';
     return `<div class="val-add${done ? ' agreed' : ''}" data-n="${n}">
       <div class="row"><select data-f="kind" aria-label="What is it?">${kindOpts(it.kind)}</select><button type="button" class="icon-btn" data-a="del" aria-label="Remove">✕</button></div>
-      <div class="fee-input"><input type="text" data-f="size" inputmode="decimal" autocomplete="off" placeholder="${VAL.unit === 'm2' ? 'Size in m², e.g. 12.5' : 'Size in sq ft, e.g. 135'}" value="${esc(it.size)}"><span>${VAL.unit === 'm2' ? 'm²' : 'sq ft'}</span></div>
+      <div class="val-lw"><div class="fee-input"><input type="text" data-f="len" inputmode="decimal" autocomplete="off" placeholder="Length" value="${esc(it.len || '')}"><span>${VAL.unit === 'm2' ? 'm' : 'ft'}</span></div><span class="val-x">×</span><div class="fee-input"><input type="text" data-f="wid" inputmode="decimal" autocomplete="off" placeholder="Width" value="${esc(it.wid || '')}"><span>${VAL.unit === 'm2' ? 'm' : 'ft'}</span></div></div>
+      ${toSqft(it.size) ? `<p class="hint val-area">= ${(+it.size).toFixed(1)} ${VAL.unit === 'm2' ? 'm²' : 'sq ft'}</p>` : ''}
       ${s ? `<p class="val-sugg">${done ? '✓ In the draft: ' : 'Suggested: '}<b>+ ${money0(fig)}</b>${it.override != null ? ' <small>(your figure)</small>' : ''}<br><small>${esc(s.why)}</small></p>` : ''}
       ${s && !done && !it.editing ? `<div class="row"><button type="button" class="btn pri small" data-a="agree">Agree, add to draft</button><button type="button" class="btn small" data-a="change">Change amount</button></div>` : ''}
       ${s && it.editing ? `<div class="fee-row"><div class="fee-input"><span>£</span><input type="text" data-f="override" inputmode="numeric" autocomplete="off" placeholder="Your figure" value="${it.override != null ? esc(it.override.toLocaleString('en-GB')) : ''}"></div><button type="button" class="btn pri small" data-a="useown">Use my figure</button></div>` : ''}
@@ -508,8 +543,8 @@ function renderValueHome() {
       <h3>Measure extra space</h3>
       ${rate.rate ? `<p class="hint">A signed-off extension here adds about <b>£${Math.round(rate.rate)} per sq ft (£${num0(rate.rate * SQ_M)} per m²)</b>: ${Math.round(rate.used * 100)}% of the £${Math.round(rate.local)} per sq ft ${esc(loc.w)}. The average also pays for the land, kitchen and location, so each extra sq ft is worth less. Other types count at the % shown. ${rate.rule ? 'Too few similar sales nearby to measure it, so this is a rule of thumb.' : `From ${rate.n} similar sales within ¾ mile${rate.beta < 0.5 ? ` the data says ${Math.round(rate.beta * 100)}%, but wrong EPC sizes pull that down, so it's kept at 50% or more` : ''}.`}</p>` : '<p class="hint">Not enough sales nearby to suggest a figure. Add your own amounts.</p>'}
       <div class="seg" role="group" aria-label="Units">
-        <button type="button" id="v-u-m2" aria-pressed="${VAL.unit === 'm2'}">m²</button>
-        <button type="button" id="v-u-ft" aria-pressed="${VAL.unit === 'ft'}">sq ft</button>
+        <button type="button" id="v-u-m2" aria-pressed="${VAL.unit === 'm2'}">Metres</button>
+        <button type="button" id="v-u-ft" aria-pressed="${VAL.unit === 'ft'}">Feet</button>
       </div>
       <label for="v-whole">Whole house measured (optional)</label>
       <div class="fee-input"><input type="text" id="v-whole" inputmode="decimal" autocomplete="off" placeholder="Total inside area" value="${esc(VAL.whole)}"><span>${VAL.unit === 'm2' ? 'm²' : 'sq ft'}</span></div>
@@ -531,8 +566,15 @@ function renderValueHome() {
     const y = window.scrollY; renderValueHome(); window.scrollTo(0, y);
   };
   const rerender = () => { const y = window.scrollY; renderValueHome(); window.scrollTo(0, y); };
-  $('#v-u-m2').onclick = () => { VAL.unit = 'm2'; rerender(); };
-  $('#v-u-ft').onclick = () => { VAL.unit = 'ft'; rerender(); };
+  const toUnit = (u) => {
+    if (VAL.unit === u) return;
+    const f = u === 'm2' ? 1 / 3.2808 : 3.2808;
+    const conv = (v) => { const x = parseFloat(String(v || '').replace(/[^\d.]/g, '')); return x > 0 ? String(Math.round(x * f * 100) / 100) : v; };
+    for (const it of VAL.adds) { it.len = conv(it.len); it.wid = conv(it.wid); const a = parseFloat(it.len) * parseFloat(it.wid); it.size = a > 0 ? String(Math.round(a * 100) / 100) : ''; }
+    VAL.unit = u; rerender();
+  };
+  $('#v-u-m2').onclick = () => toUnit('m2');
+  $('#v-u-ft').onclick = () => toUnit('ft');
   const wholeOut = () => {
     VAL.whole = $('#v-whole').value;
     const v = toSqft(VAL.whole);
@@ -545,7 +587,7 @@ function renderValueHome() {
   $('#v-add').onclick = () => {
     VAL.adds.push({ kind: 'ext1', size: '', status: 'new', override: null });
     rerender();
-    const all = document.querySelectorAll('.val-add input[data-f=size]');
+    const all = document.querySelectorAll('.val-add input[data-f=len]');
     if (all.length) all[all.length - 1].focus();
   };
   const box = $('#v-adds');
@@ -553,10 +595,10 @@ function renderValueHome() {
   box.addEventListener('change', (e) => {
     const { it } = itemOf(e.target); if (!it) return;
     if (e.target.dataset.f === 'kind') { it.kind = e.target.value; it.status = 'new'; it.override = null; it.editing = false; rerender(); }
-    if (e.target.dataset.f === 'size') { it.size = e.target.value; it.status = 'new'; rerender(); }
+    if (e.target.dataset.f === 'len' || e.target.dataset.f === 'wid') { it[e.target.dataset.f] = e.target.value; const n = (v) => parseFloat(String(v || '').replace(/[^\d.]/g, '')); const a = n(it.len) * n(it.wid); it.size = a > 0 ? String(Math.round(a * 100) / 100) : ''; it.status = 'new'; rerender(); }
   });
-  box.addEventListener('input', (e) => { const { it } = itemOf(e.target); if (it && e.target.dataset.f === 'size') it.size = e.target.value; });
-  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset.f === 'size') e.target.blur(); });
+  box.addEventListener('input', (e) => { const { it } = itemOf(e.target); if (it && (e.target.dataset.f === 'len' || e.target.dataset.f === 'wid')) { it[e.target.dataset.f] = e.target.value; const n = (v) => parseFloat(String(v || '').replace(/[^\d.]/g, '')); const a = n(it.len) * n(it.wid); it.size = a > 0 ? String(Math.round(a * 100) / 100) : ''; } });
+  box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.target.dataset.f === 'len' || e.target.dataset.f === 'wid')) e.target.blur(); });
   box.addEventListener('click', (e) => {
     const b = e.target.closest('button[data-a]'); if (!b) return;
     const { d, it } = itemOf(b); if (!it) return;
@@ -678,7 +720,7 @@ function pdfData(ticks, note) {
   const from = S.settings.name ? `${S.settings.name}, Griffin` : 'Griffin';
   return { address: sub.a, sub: [sub.pc, sub.st].filter(Boolean).join(' · '), postcode: sub.pc, from, note,
     date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), tiles, sections,
-    disclaimer: valueFooter(!!ticks.market), buttons: contactButtons() };
+    disclaimer: valueFooter(!!ticks.market), buttons: contactButtons(), instruct: instructButton() };
 }
 
 const pdfName = () => `Market appraisal - ${VAL.home.a}.pdf`.replace(/[\\/:*?"<>|]/g, '');

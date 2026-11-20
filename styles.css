@@ -359,3 +359,8 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; border: 1px 
 .mk-stats span { background: var(--bg); border-radius: 8px; padding: 6px 2px; text-align: center; font-size: 0.7rem; line-height: 1.1; }
 .mk-stats span b { display: block; font-size: 1.3rem; color: var(--navy-text); }
 .mk-stats span.bad b { color: var(--red-text); }
+.val-lw { display: flex; align-items: center; gap: 6px; }
+.val-lw .fee-input { flex: 1; min-width: 0; }
+.val-x { font-weight: 800; font-size: 1.2rem; }
+.val-area { margin: 2px 0 0; font-weight: 700; }
+.val-rm { display: inline-block; margin-top: 4px; font-weight: 700; font-size: 0.85rem; }
