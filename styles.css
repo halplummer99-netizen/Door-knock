@@ -236,6 +236,9 @@ input:focus, textarea:focus, select:focus, button:focus-visible, a:focus-visible
 .hot-toggle.xmas-toggle { margin-top: 10px; border-color: var(--ans); color: var(--ans); }
 .hot-toggle.xmas-toggle.on { background: var(--ans); color: #fff; }
 .lead.xmas-item { border-left-color: var(--ans); }
+.lead.ov-item { border-left-color: var(--warn-fg); }
+.lead.ov-item .ov-add { margin-top: 8px; }
+.ov-bin { color: var(--bad-fg); }
 .counter { display: flex; align-items: center; gap: 12px; }
 .counter button { width: 64px; height: 64px; font: inherit; font-size: 2rem; font-weight: 800; border: 2px solid var(--fg); border-radius: 12px; background: var(--bg); color: var(--fg); cursor: pointer; }
 .counter output { min-width: 56px; text-align: center; font-size: 2rem; font-weight: 800; }

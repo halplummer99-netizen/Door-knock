@@ -525,7 +525,7 @@ function render() {
   showTabs();
   if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, overflow: renderOverflow, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;
@@ -556,7 +556,14 @@ async function renderSetup() {
       <button class="btn small" id="clear" type="button">Clear addresses</button>
     </div>
     <div id="plan-status" class="notice info" hidden></div>
+    <div class="stack" id="ov-wrap" hidden><button class="btn small" id="ov-open" type="button"></button></div>
   `;
+  overflowEntries().then((list) => {
+    if (!list.length || !$('#ov-open')) return;
+    $('#ov-open').textContent = `📮 Overflow list (${list.length})`;
+    $('#ov-wrap').hidden = false;
+    $('#ov-open').onclick = () => go('overflow');
+  });
   const ta = $('#addr');
   const count = () => {
     const n = ta.value.split(/\r?\n/).filter((l) => l.trim()).length;
@@ -574,7 +581,10 @@ async function renderSetup() {
   $('#file').onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const lines = csvToLines(await f.text());
+    const text = await f.text();
+    e.target.value = '';
+    if (await takeOverflowCsv(text)) return;
+    const lines = csvToLines(text);
     addLinesToDraft(lines, `Imported ${lines.length} address${lines.length === 1 ? '' : 'es'} from ${f.name}`);
   };
   $('#clear').onclick = () => {
@@ -1261,9 +1271,11 @@ async function renderHistory() {
     }).join('')}
     ${runs.length ? `<div class="stack"><button class="btn" id="all" type="button">Share CSV of all runs</button>
       <button class="btn" id="xmas-list" type="button">🎄 Christmas card list (${xmasEntries(runs).length})</button></div>` : ''}
+    <div class="stack"><button class="btn" id="ov-list" type="button">📮 Overflow list (${(await overflowEntries()).length})</button></div>
     <div class="stack"><button class="btn pri" id="new" type="button">Plan a new run</button></div>
   `;
   if ($('#xmas-list')) $('#xmas-list').onclick = () => go('xmas');
+  $('#ov-list').onclick = () => go('overflow');
   app.querySelectorAll('.runcard').forEach((b) => {
     b.onclick = () => {
       const r = runs.find((x) => x.id === b.dataset.id);
@@ -1346,6 +1358,83 @@ async function renderXmas() {
     catch (err) { toast('Couldn’t copy. Use Share list as CSV instead.'); }
   };
   $('#xmas-back').onclick = () => go('history');
+}
+
+/* ---------------- Overflow list ---------------- */
+// Hal, 23 Nov 2026: doors he tried twice and couldn't do (letter missed twice / couldn't find it twice) come from his PC
+// as "Overflow list.csv" (list_type overflow). They're kept here, apart from today's run, until the PC says they're done.
+// ✕ hides one on this phone only; to take it off for good he tells Claude "take X off overflow".
+function parseOverflowCsv(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) return null;
+  const hdr = rows[0].map((x) => x.trim().toLowerCase());
+  const li = hdr.indexOf('list_type');
+  if (li < 0 || hdr.indexOf('reason') < 0) return null;
+  const body = rows.slice(1);
+  if (body.some((r) => (r[li] || '').trim() !== 'overflow')) return null;
+  const col = (r, k) => (r[hdr.indexOf(k)] || '').trim();
+  return { built: body.length ? col(body[0], 'built_on') : localDate(), entries: body.map((r) => ({
+    address: col(r, 'address'), reason: col(r, 'reason'), since: col(r, 'since'), letter: col(r, 'letter'),
+    todo: col(r, 'what_to_do'), directions: col(r, 'directions'), facts: col(r, 'facts') })) };
+}
+async function takeOverflowCsv(text, show = true) {
+  const ov = parseOverflowCsv(text);
+  if (!ov) return false;
+  await DB.put('kv', ov, 'overflow');
+  const n = (await overflowEntries()).length;
+  if (show) go('overflow');
+  toast(`Overflow list updated: ${n} door${n === 1 ? '' : 's'}. Kept apart from today's run.`);
+  return true;
+}
+const ovKey = (a) => String(a).toLowerCase().replace(/[^a-z0-9]/g, '');
+async function overflowEntries() {
+  const ov = (await DB.get('kv', 'overflow')) || { entries: [] };
+  const hidden = new Set((await DB.get('kv', 'overflowHidden')) || []);
+  return ov.entries.filter((e) => !hidden.has(ovKey(e.address)));
+}
+async function overflowToDraft(list) {
+  S.doorFacts = { ...(S.doorFacts || {}) };
+  for (const e of list) if (e.facts) S.doorFacts[factKey(e.address)] = e.facts;
+  await DB.put('kv', S.doorFacts, 'doorFacts');
+  await addLinesToDraft(list.map((e) => e.address), `Added ${list.length} overflow door${list.length === 1 ? '' : 's'} to your addresses`);
+}
+async function renderOverflow() {
+  const ov = (await DB.get('kv', 'overflow')) || null;
+  const list = await overflowEntries();
+  app.innerHTML = `
+    <h2>📮 Overflow list</h2>
+    <p class="meta">Doors you've tried twice, kept apart from your daily list${ov ? ` · from your PC ${esc(prettyDate(ov.built))}` : ''}</p>
+    ${!ov ? '<p>Nothing here yet. Share <b>Overflow list.csv</b> (OneDrive › Door Knock list) to the app to load it.</p>'
+      : list.length ? '' : '<p>Nothing on the overflow list.</p>'}
+    ${list.map((e, i) => `
+      <div class="lead ov-item">
+        <div class="row" style="align-items:flex-start">
+          <div style="flex:1"><b>${esc(e.address)}</b><br><small>${esc(e.reason)}${e.since ? ` · since ${esc(prettyDate(e.since))}` : ''}</small>
+            ${e.letter ? `<br>✉️ ${esc(e.letter)}` : ''}
+            <br>${/^BIN/.test(e.todo) ? `<b class="ov-bin">${esc(e.todo)}</b>` : esc(e.todo)}
+            ${e.directions ? `<br><small class="meta">Your notes: ${esc(e.directions)}</small>` : ''}</div>
+          <button class="icon-btn" type="button" data-i="${i}" aria-label="Hide on this phone" style="flex:none">✕</button>
+        </div>
+        <button class="btn small ov-add" type="button" data-i="${i}">Add to my addresses</button>
+      </div>`).join('')}
+    ${list.length ? '<div class="stack"><button class="btn pri big" id="ov-all" type="button">Add all to my addresses</button></div>' : ''}
+    <div class="stack"><button class="btn small" id="ov-back" type="button">Back to runs</button></div>
+  `;
+  app.querySelectorAll('.ov-item .icon-btn').forEach((b) => {
+    b.onclick = async () => {
+      const e = list[+b.dataset.i];
+      const hidden = (await DB.get('kv', 'overflowHidden')) || [];
+      await DB.put('kv', [...hidden, ovKey(e.address)], 'overflowHidden');
+      renderOverflow();
+      toast(`Hidden on this phone. To take it off for good, tell Claude "take ${e.address.split(',')[0]} off overflow".`, { label: 'Undo', fn: async () => {
+        await DB.put('kv', hidden, 'overflowHidden');
+        renderOverflow();
+      } }, 8000);
+    };
+  });
+  app.querySelectorAll('.ov-add').forEach((b) => { b.onclick = () => overflowToDraft([list[+b.dataset.i]]); });
+  if ($('#ov-all')) $('#ov-all').onclick = () => overflowToDraft(list);
+  $('#ov-back').onclick = () => go('history');
 }
 
 /* ---------------- Settings ---------------- */
@@ -1492,7 +1581,17 @@ async function takeShare() {
     return true;
   }
   const lines = [];
-  for (const f of sh.files || []) lines.push(...csvToLines(f.text));
+  let gotOverflow = false;
+  for (const f of sh.files || []) {
+    if (await takeOverflowCsv(f.text, false)) { gotOverflow = true; continue; }
+    lines.push(...csvToLines(f.text));
+  }
+  if (gotOverflow && !lines.length && !(sh.text || '').trim()) {
+    S.view = 'overflow';
+    history.replaceState({ view: 'overflow' }, '');
+    render();
+    return true;
+  }
   const text = [sh.title, sh.text].filter(Boolean).join('\n');
   if (text.trim()) {
     const looksCsv = /(^|\n)\s*"?(address|first_line|postcode)"?\s*,/i.test(text);

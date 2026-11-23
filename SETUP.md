@@ -119,6 +119,15 @@ On any door card, tap **Send them a Christmas card**. Everyone you've ticked, ac
 "The Occupier". **Share list as CSV** gives `name, address, postcode, added_on, run_id`, ready for a label mail merge.
 **Copy names & addresses** copies them as address blocks. Tap ✕ to take someone off the list.
 
+### Overflow list (dk-v24, 23 Nov 2026)
+
+Doors you've tried twice and couldn't do (a letter missed twice, or a door you couldn't find on two days) come from your PC
+as **OneDrive › Door Knock list › Overflow list.csv**. Share it to Door Knock (or Import CSV) and it goes into its own list,
+**Runs → 📮 Overflow list**, never into today's run. Each door shows why it's there, the letter that goes with it (keep it,
+unless it says BIN because the listing has changed) and your notes from those visits. **Add to my addresses** / **Add all**
+puts them in a run when you've time; log them as usual and they drop off once the letter's delivered or you've found the door.
+✕ only hides a door on this phone: to take it off for good, tell Claude "take X off overflow".
+
 ### Updating the app later
 
 Upload the changed files to the GitHub repository again and change `VERSION` at the top of `sw.js`
