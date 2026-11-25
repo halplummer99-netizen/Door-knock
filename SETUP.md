@@ -158,3 +158,6 @@ contacts and fees stay on their own phone.
 
 Your own link is `https://halplummer99-netizen.github.io/Door-knock/?name=Hal+Plummer`. A link with a name only
 (no `&key=`) sets the name without touching anyone's key or postcodes. Anyone can change their name in **Settings → Your name**.
+
+### See the house (dk-v25, 25 Nov 2026)
+Door card button **See the house** opens a sheet with **Street View** (turned to face the address pin, with the photo's month and how far from the house it was taken) and **Satellite** (hybrid map, pin on the address). Both come with the Maps JavaScript API the key already has, so nothing new to switch on in Google Cloud. Only loads when tapped (keeps it inside Google's free monthly allowance). If Google has no Street View within 150 m it switches to Satellite. Needs signal.

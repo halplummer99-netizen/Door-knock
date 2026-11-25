@@ -948,6 +948,7 @@ function renderDoor() {
       ${s.geo === 'fail' ? `<div class="notice bad">No map pin for this one. Navigate will search the address.</div>` : ''}
       ${s.geo === 'check' ? `<div class="notice warn">${esc(s.note)}</div>` : ''}
       <a class="btn" href="${esc(navUrl(s))}" target="_blank" rel="noopener">Navigate here</a>
+      <button class="btn" id="d-house" type="button">See the house</button>
       <button class="btn" id="d-value" type="button">Market appraisal</button>
       <div class="gps" id="gps">${esc(gpsText(s))}</div>
 
@@ -1046,6 +1047,10 @@ function renderDoor() {
     touch();
   };
   $('#d-value').onclick = () => openValueFor(s.address, s.postcode);
+  $('#d-house').onclick = () => {
+    if (!navigator.onLine) return toast('No signal. The house photo needs internet.');
+    openHouseSheet(s);
+  };
   $('#letter').onclick = () => {
     L.letter_delivered = !L.letter_delivered;
     L.letter_at = L.letter_delivered ? nowIso() : '';
@@ -1147,6 +1152,112 @@ function openStopsSheet() {
   });
 }
 function closeSheet() { const s = $('#sheet'); if (s) s.remove(); }
+
+/* ---------------- See the house: Street View + satellite (dk-v25, 25 Nov 2026) ----------------
+   For doors Hal can't find. Both come with the Maps JavaScript API the app already uses, so no new
+   Google API to switch on. Street View turns the camera from the nearest Google photo towards the
+   house pin, and says how old the photo is and how far from the house it was taken. */
+async function housePoint(s) {
+  if (s.lat != null) return { lat: s.lat, lng: s.lng, note: s.geo === 'check' ? s.note : '' };
+  const r = await geocode(s.address + (s.postcode ? ', ' + s.postcode : ''), s.postcode);
+  if (r.geo === 'fail') throw new Error(r.note || 'Google couldn’t find this address');
+  return { lat: r.lat, lng: r.lng, note: r.geo === 'check' ? r.note : '' };
+}
+const headingTo = (a, b) => {
+  const toR = (d) => d * Math.PI / 180, y = Math.sin(toR(b.lng - a.lng)) * Math.cos(toR(b.lat));
+  const x = Math.cos(toR(a.lat)) * Math.sin(toR(b.lat)) - Math.sin(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.cos(toR(b.lng - a.lng));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+};
+const photoDate = (d) => {
+  const m = /^(\d{4})-(\d{2})/.exec(d || '');
+  return m ? new Date(+m[1], +m[2] - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+};
+
+function openHouseSheet(s) {
+  closeSheet();
+  const wrap = document.createElement('div');
+  wrap.className = 'sheet-backdrop';
+  wrap.id = 'sheet';
+  wrap.innerHTML = `
+    <div class="sheet house-sheet" role="dialog" aria-label="See the house">
+      <div class="row" style="margin-bottom:8px"><h3 style="margin:0">${esc(s.address)}</h3><button class="btn small" id="sheet-close" type="button" style="flex:none">Close</button></div>
+      <div class="chips house-tabs" role="tablist">
+        <button type="button" class="chip on" data-t="street">Street View</button>
+        <button type="button" class="chip" data-t="sat">Satellite</button>
+      </div>
+      <div class="house-view" id="hv-street"><div class="house-msg">Loading Street View…</div></div>
+      <div class="house-view" id="hv-sat" hidden><div class="house-msg">Loading satellite…</div></div>
+      <div class="house-info" id="hv-info"></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap || e.target.id === 'sheet-close') return closeSheet();
+    const t = e.target.closest('.house-tabs .chip');
+    if (t) {
+      wrap.querySelectorAll('.house-tabs .chip').forEach((c) => c.classList.toggle('on', c === t));
+      $('#hv-street').hidden = t.dataset.t !== 'street';
+      $('#hv-sat').hidden = t.dataset.t !== 'sat';
+      if (t.dataset.t === 'sat') showSat();
+      showInfo(t.dataset.t);
+    }
+  });
+
+  let house = null, satDone = false;
+  const info = { street: '', sat: '' };
+  const showInfo = (t) => { const el = $('#hv-info'); if (el) el.textContent = [info[t], house && house.note ? 'Pin may be off: ' + house.note : ''].filter(Boolean).join(' · '); };
+  const fail = (id, msg) => { const el = $(id); if (el) el.innerHTML = `<div class="house-msg">${esc(msg)}</div>`; };
+
+  const ready = (async () => {
+    await loadMaps();
+    if (S.mapsAuthFailed) throw new Error('Google rejected the API key. Check Settings.');
+    house = await housePoint(s);
+  })();
+
+  async function showSat() {
+    if (satDone) return; satDone = true;
+    try {
+      await ready;
+      const { Map } = await google.maps.importLibrary('maps');
+      const { Marker } = await google.maps.importLibrary('marker');
+      const el = $('#hv-sat'); if (!el) return;
+      el.innerHTML = '';
+      const map = new Map(el, { center: house, zoom: 19, mapTypeId: 'hybrid', tilt: 0, streetViewControl: false, mapTypeControl: false, fullscreenControl: false, gestureHandling: 'greedy' });
+      new Marker({ map, position: house, title: s.address });
+      info.sat = 'Red pin = where Google puts the address. Pinch to zoom out.';
+      showInfo('sat');
+    } catch (e) { fail('#hv-sat', e.message || String(e)); }
+  }
+
+  (async () => {
+    try {
+      await ready;
+      const { StreetViewService, StreetViewPanorama, StreetViewPreference, StreetViewSource } = await google.maps.importLibrary('streetView');
+      const svc = new StreetViewService();
+      let pano = null;
+      for (const radius of [50, 150]) {
+        try {
+          const r = await svc.getPanorama({ location: house, radius, preference: StreetViewPreference.NEAREST, sources: [StreetViewSource.OUTDOOR] });
+          pano = r.data; break;
+        } catch (e) { /* none within this radius, try wider */ }
+      }
+      if (!$('#hv-street')) return;   // sheet closed while loading
+      if (!pano) {
+        fail('#hv-street', 'Google has no Street View photo near this house. Try Satellite.');
+        wrap.querySelector('.house-tabs .chip[data-t="sat"]').click();
+        return;
+      }
+      const at = { lat: pano.location.latLng.lat(), lng: pano.location.latLng.lng() };
+      const el = $('#hv-street'); el.innerHTML = '';
+      new StreetViewPanorama(el, {
+        pano: pano.location.pano, pov: { heading: headingTo(at, house), pitch: 5 }, zoom: 1,
+        addressControl: false, fullscreenControl: false, motionTracking: false, motionTrackingControl: false, showRoadLabels: false,
+      });
+      const m = Math.round(metresBetween(at.lat, at.lng, house.lat, house.lng));
+      info.street = [photoDate(pano.imageDate) ? 'Photo taken ' + photoDate(pano.imageDate) : '', m > 40 ? `taken ${m} m from the house, so it may only show the drive or the road` : ''].filter(Boolean).join(', ');
+      showInfo('street');
+    } catch (e) { fail('#hv-street', e.message || String(e)); }
+  })();
+}
 
 /* ---------------- Summary ---------------- */
 function stats(run) {
