@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v26';
+const VERSION = 'dk-v28';
 const SHELL = [
   './',
   './index.html',
@@ -10,6 +10,11 @@ const SHELL = [
   './appraisal-pdf.js',
   './appraisal-price.js',
   './letters.js',
+  './slips.js',
+  './fonts/montserrat-latin-500-normal.woff2',
+  './fonts/montserrat-latin-600-normal.woff2',
+  './fonts/montserrat-latin-700-normal.woff2',
+  './fonts/montserrat-latin-800-normal.woff2',
   './vendor/pdf-lib.min.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
