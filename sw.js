@@ -1,6 +1,6 @@
 // Door Knock service worker: offline app shell + Android share target.
 // Bump VERSION whenever the app files change so phones pick up the new copy.
-const VERSION = 'dk-v25';
+const VERSION = 'dk-v26';
 const SHELL = [
   './',
   './index.html',
@@ -9,6 +9,8 @@ const SHELL = [
   './appraisal.js',
   './appraisal-pdf.js',
   './appraisal-price.js',
+  './letters.js',
+  './vendor/pdf-lib.min.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -70,7 +72,10 @@ async function handleShare(request) {
     const form = await request.formData();
     const files = [];
     for (const f of form.getAll('file')) {
-      if (f && typeof f.text === 'function') files.push({ name: f.name || 'shared.csv', text: await f.text() });
+      if (!f || typeof f.text !== 'function') continue;
+      // Letters PDFs are kept as files (Letters tab); lists and packs as text.
+      if (f.type === 'application/pdf' || /.pdf$/i.test(f.name || '')) files.push({ name: f.name || 'letters.pdf', blob: f });
+      else files.push({ name: f.name || 'shared.csv', text: await f.text() });
     }
     await kvPut('pendingShare', {
       title: form.get('title') || '',

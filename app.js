@@ -246,6 +246,7 @@ function csvToLines(text) {
   if (isHeader && bi >= 0 && data.length) csvToLines.info = { built: (data[0][bi] || '').trim(), text: ii >= 0 ? (data[0][ii] || '').trim() : '' };
   if (!isHeader) { ai = 0; pi = rows[0].length > 1 ? 1 : -1; }
   const out = [];
+  const lineOfRow = new Map();
   for (const r of data) {
     let a = ai >= 0 ? (r[ai] || '').trim() : '';
     if (!a && (fi >= 0 || si >= 0)) {
@@ -259,8 +260,11 @@ function csvToLines(text) {
     if (!a && !pc) continue;
     const line = pc && !hasPostcode(a) ? `${a}, ${pc}` : a;
     out.push(line);
+    lineOfRow.set(r, line);
     if (ci >= 0 && (r[ci] || '').trim()) (csvToLines.facts = csvToLines.facts || {})[factKey(line)] = r[ci].trim();
   }
+  // Today's list also says which letter each door gets (Letters tab, letters.js).
+  if (isHeader) { const lt = lettersFromCsv(hdr, data, (r) => lineOfRow.get(r)); if (lt) csvToLines.letters = lt; }
   return out;
 }
 
@@ -507,14 +511,15 @@ window.addEventListener('popstate', (e) => {
 });
 $('#tb-home').onclick = () => go(S.run && S.run.status === 'active' ? 'door' : S.run && S.run.status === 'planning' ? 'review' : 'setup');
 $('#tb-fees').onclick = () => go('fees');
+$('#tb-letters').onclick = () => go('letters');
 $('#tb-value').onclick = () => go('value');
 $('#tb-runs').onclick = () => go('history');
 $('#tb-settings').onclick = () => go('settings');
 
-const TAB_OF = { value: 'tb-value', fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
+const TAB_OF = { letters: 'tb-letters', value: 'tb-value', fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
 function showTabs() {
   const on = TAB_OF[S.view] || 'tb-home';
-  for (const id of ['tb-home', 'tb-value', 'tb-fees', 'tb-runs', 'tb-settings']) {
+  for (const id of ['tb-home', 'tb-letters', 'tb-value', 'tb-fees', 'tb-runs', 'tb-settings']) {
     if (id === on) $('#' + id).setAttribute('aria-current', 'page'); else $('#' + id).removeAttribute('aria-current');
   }
   $('#who').textContent = S.settings.name || '';
@@ -525,7 +530,7 @@ function render() {
   showTabs();
   if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, overflow: renderOverflow, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, overflow: renderOverflow, letters: renderLetters, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;
@@ -605,6 +610,10 @@ async function addLinesToDraft(lines, message) {
     S.doorFacts = { ...(S.doorFacts || {}), ...csvToLines.facts };
     csvToLines.facts = null;
     await DB.put('kv', S.doorFacts, 'doorFacts');
+  }
+  if (csvToLines.letters) {
+    await saveLetterList(csvToLines.letters);
+    csvToLines.letters = null;
   }
   if (S.view === 'setup') renderSetup(); else go('setup');
   const info = csvToLines.info;
@@ -1682,6 +1691,18 @@ async function takeShare() {
   const sh = await DB.get('kv', 'pendingShare');
   if (!sh) return false;
   await DB.del('kv', 'pendingShare');
+  // Letters PDFs (OneDrive › Door Knock letters) go to the Letters tab; anything else shared with them carries on below.
+  const pdfs = (sh.files || []).filter((f) => f.blob);
+  sh.files = (sh.files || []).filter((f) => !f.blob);
+  if (pdfs.length) {
+    await takeSharedPdfs(pdfs);
+    if (!sh.files.length && !(sh.text || '').trim()) {
+      S.view = 'letters';
+      history.replaceState({ view: 'letters' }, '');
+      render();
+      return true;
+    }
+  }
   // An area pack for the Market appraisal tab comes in the same way as a door list.
   const pack = (sh.files || []).find((f) => looksLikePack(f.text));
   if (pack) {
