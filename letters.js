@@ -25,11 +25,15 @@ function lettersFromCsv(hdr, data, lineOf) {
     const g = (k) => (at(k) >= 0 ? (r[at(k)] || '').trim() : '');
     rows.push({
       stop: +g('stop') || i + 1, line, letter: g('letter'), why: g('letter_why'),
-      day: g('letter_day'), page: +g('letter_page') || 0, pages: +g('letter_pages') || 0
+      day: g('letter_day'), page: +g('letter_page') || 0, pages: +g('letter_pages') || 0, file: g('letter_file')
     });
   });
   if (!rows.some((x) => x.letter)) return null;
-  return { built: (data[0] && at('built_on') >= 0 ? (data[0][at('built_on')] || '').trim() : ''), rows };
+  const built = (data[0] && at('built_on') >= 0 ? (data[0][at('built_on')] || '').trim() : '');
+  // Which PDF holds each letter: from 26 Nov 2026 ONE file for the whole list ("Door knock letters.pdf", key list:<day>);
+  // older lists point at each print day's own file (key = that day).
+  for (const r of rows) r.key = r.file ? 'list:' + built : r.day;
+  return { built, rows };
 }
 
 async function saveLetterList(list) {
@@ -91,32 +95,45 @@ async function guessPdfDay(name, pages, created) {
 
 // Save one letters PDF. forDay = the day the person picked it for (Load button); otherwise worked out.
 async function addLetterPdf(file, forDay) {
+  const LIST_PDF = /^Door knock letters (\d{4}-\d\d-\d\d)/;
   let doc;
   try { doc = await readPdf(file); } catch (e) { toast(`${file.name || 'That file'} couldn't be read as a PDF: ${e.message}`, null, 8000); return null; }
   const pages = doc.getPageCount();
   let created = null;
   try { created = doc.getCreationDate() || null; } catch (e) { /* no date in the file */ }
-  const day = forDay || (await guessPdfDay(file.name, pages, created));
+  const list = (await DB.get('kv', 'letterList')) || { rows: [] };
+  let title = '';
+  try { title = doc.getTitle() || ''; } catch (e) { /* untitled */ }
+  const forList = LIST_PDF.exec(title);
+  let day = forDay;
+  if (!day && forList) {
+    day = 'list:' + forList[1];
+    if (forList[1] !== list.built) {
+      toast(`That letters PDF is for ${prettyDate(forList[1])}, but your list is for ${prettyDate(list.built) || 'another day'}. Import today's Door knock list.csv and Door knock letters.pdf together.`, null, 12000);
+      return null;
+    }
+  }
+  if (!day && /^door knock letters/i.test(file.name || '') && list.rows.some((r) => r.key === 'list:' + list.built)) day = 'list:' + list.built;
+  if (!day) day = await guessPdfDay(file.name, pages, created);
   if (!day) {
-    toast(`Couldn't tell which day ${file.name || 'that PDF'} is for. Use the "Load PDF" button under that day instead.`, null, 9000);
+    toast(`Couldn't tell which day ${file.name || 'that PDF'} is for. Use the "Load PDF" button on the Letters tab instead.`, null, 9000);
     return null;
   }
-  const list = (await DB.get('kv', 'letterList')) || { rows: [] };
-  const want = (list.rows.find((r) => r.day === day) || {}).pages;
+  const want = (list.rows.find((r) => (r.key || r.day) === day) || {}).pages;
   const blob = new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
   await DB.put('kv', blob, 'letterPdf:' + day);
   const idx = await pdfIndex();
   idx[day] = { name: file.name || 'letters.pdf', pages, added: Date.now() };
   await DB.put('kv', idx, 'letterPdfs');
   const warn = want && want !== pages ? ` WARNING: it has ${pages} pages but the list expects ${want}, so pages may not line up. Check you picked the letters file (not the slips).` : '';
-  toast(`Letters PDF for ${prettyDate(day)} saved on the phone (${pages} pages).${warn}`, null, warn ? 12000 : 4000);
+  toast(`${day.startsWith('list:') ? `All ${pages} letters for ${prettyDate(day.slice(5))}` : `Letters PDF for ${prettyDate(day)}`} saved on the phone: print or share them on the Letters tab.${warn}`, null, warn ? 12000 : 5000);
   return day;
 }
 
 // Keep PDFs for days still on the list, plus anything added in the last 3 weeks (bag life is 14 days).
 async function pruneLetterPdfs(list) {
   const idx = await pdfIndex();
-  const keep = new Set((list.rows || []).map((r) => r.day));
+  const keep = new Set((list.rows || []).map((r) => r.key || r.day));
   const cut = Date.now() - 21 * 86400000;
   let changed = false;
   for (const day of Object.keys(idx)) {
@@ -135,12 +152,13 @@ async function buildLettersPdf(rows) {
   const docs = {};
   let n = 0;
   for (const r of rows) {
-    if (!docs[r.day]) {
-      const blob = await DB.get('kv', 'letterPdf:' + r.day);
+    const key = r.key || r.day;
+    if (!docs[key]) {
+      const blob = await DB.get('kv', 'letterPdf:' + key);
       if (!blob) continue;
-      docs[r.day] = await readPdf(blob);
+      docs[key] = await readPdf(blob);
     }
-    const src = docs[r.day];
+    const src = docs[key];
     if (!r.page || r.page > src.getPageCount()) continue;
     const [p] = await out.copyPages(src, [r.page - 1]);
     out.addPage(p);
@@ -185,23 +203,25 @@ async function renderLetters() {
   const list = await DB.get('kv', 'letterList');
   const idx = await pdfIndex();
   const rows = list ? list.rows : [];
-  const days = [...new Set(rows.map((r) => r.day).filter(Boolean))].sort();
+  for (const r of rows) if (!r.key) r.key = r.day;   // lists saved by dk-v26
+  const days = [...new Set(rows.map((r) => r.key).filter(Boolean))].sort();
   const old = list && list.built && list.built < localDate();
-  const ready = rows.filter((r) => r.day && idx[r.day] && r.page);
+  const ready = rows.filter((r) => r.key && idx[r.key] && r.page);
   const handed = rows.filter((r) => { const L = letterDelivered(r.line); return L && L.letter_delivered; }).length;
 
   const missing = days.filter((d) => !idx[d]);
   const dayBoxes = `<div class="lt-days">
         ${days.map((d) => {
-          const n = rows.filter((r) => r.day === d).length;
+          const n = rows.filter((r) => r.key === d).length;
           const have = idx[d];
+          const whole = d.startsWith('list:');
           return `<div class="lt-day">
-            <div><b>${d === list.built ? 'Printed for today' : `Printed ${esc(shortDay(d))}`}</b> · ${n} letter${n === 1 ? '' : 's'}<br>
-              <small class="meta">${have ? `✓ PDF on phone (${have.pages} pages)` : `Needs "NEXT TO PRINT - letters - ${esc(shortDay(d))}.pdf"${d === list.built ? '' : " or that day's PRINT ME letters file"}`}</small></div>
+            <div><b>${whole ? `All ${n} letters` : d === list.built ? 'Printed for today' : `Printed ${esc(shortDay(d))}`}</b>${whole ? '' : ` · ${n} letter${n === 1 ? '' : 's'}`}<br>
+              <small class="meta">${have ? `✓ PDF on phone (${have.pages} pages)` : whole ? 'Needs "Door knock letters.pdf" (OneDrive › Door Knock list, next to the list)' : `Needs "NEXT TO PRINT - letters - ${esc(shortDay(d))}.pdf"${d === list.built ? '' : " or that day's PRINT ME letters file"}`}</small></div>
             <button class="btn small lt-load" type="button" data-day="${d}">${have ? 'Replace' : 'Load PDF'}</button>
           </div>`;
         }).join('')}
-        <input type="file" id="lt-file" accept="application/pdf,.pdf" hidden>
+        <input type="file" id="lt-file" accept="application/pdf,.pdf" multiple hidden>
       </div>`;
   app.innerHTML = `
     <h2>✉️ Letters</h2>
@@ -210,16 +230,16 @@ async function renderLetters() {
     ${!rows.length ? '<div class="stack"><button class="btn big lt-slips" type="button">✂️ Slips: edit and print</button></div>' : ''}
     ${old ? `<div class="notice warn">This is ${esc(prettyDate(list.built))}'s list, not today's. Share today's Door knock list.csv to update it.</div>` : ''}
     ${rows.length ? `
-      ${missing.length ? `<div class="notice warn">Load the letters PDF${missing.length === 1 ? '' : 's'} below to print from here (or in OneDrive: ⋮ › Share › Griffin on the PDF).</div>${dayBoxes}` : ''}
+      ${missing.length ? `<div class="notice warn">${missing.some((d) => d.startsWith('list:')) ? 'Load <b>Door knock letters.pdf</b> to print from here. It sits next to Door knock list.csv in OneDrive › Door Knock list: tick both when you tap Import on the Door Knock tab.' : `Load the letters PDF${missing.length === 1 ? '' : 's'} below to print from here.`}</div>${dayBoxes}` : ''}
       <div class="stack">
-        <button class="btn pri big" id="lt-all" type="button" ${ready.length ? '' : 'disabled'}>🖨️ Print / share all ${ready.length === rows.length ? rows.length : `${ready.length} of ${rows.length}`} letters</button>
+        <button class="btn pri big" id="lt-all" type="button">🖨️ Print / share all ${ready.length === rows.length ? rows.length : `${ready.length} of ${rows.length}`} letters</button>
         <button class="btn big lt-slips" type="button">✂️ Slips: edit and print (${Math.ceil(rows.length / 3)} sheet${Math.ceil(rows.length / 3) === 1 ? '' : 's'})</button>
       </div>
       ${rows.map((r, i) => {
         const t = (r.letter || '?').split(' ')[0];
         const L = letterDelivered(r.line);
         const facts = ((S.doorFacts || {})[factKey(r.line)] || '').split('\n')[0];
-        const can = r.day && idx[r.day] && r.page;
+        const can = r.key && idx[r.key] && r.page;
         return `<div class="lead lt-item" style="border-left-color:${LETTER_TYPES_COLOUR[t] || 'var(--oth)'}">
           <div class="row" style="align-items:flex-start">
             <span class="lt-type" style="background:${LETTER_TYPES_COLOUR[t] || 'var(--oth)'}">${esc(t)}</span>
@@ -228,7 +248,7 @@ async function renderLetters() {
               ${facts ? `<br><small class="meta">${esc(facts)}</small>` : ''}
               <br><small class="meta">${r.day && r.day !== list.built ? `In your bag since ${esc(shortDay(r.day))}` : 'Printed for today'}${r.page ? ` · page ${r.page} of ${r.pages}` : ''}${L && L.letter_delivered ? ' · <b>✉️ handed over</b>' : ''}</small></div>
           </div>
-          <button class="btn small lt-one" type="button" data-i="${i}" ${can ? '' : 'disabled'}>🖨️ Print / share this letter</button>
+          <button class="btn small lt-one${can ? '' : ' lt-off'}" type="button" data-i="${i}">🖨️ Print / share this letter</button>
         </div>`;
       }).join('')}
       ${missing.length ? '' : `<details class="lt-pdfs"><summary>Letters PDFs on this phone (${days.length})</summary>${dayBoxes}</details>`}` : ''}
@@ -238,12 +258,17 @@ async function renderLetters() {
   let loadDay = '';
   app.querySelectorAll('.lt-load').forEach((b) => { b.onclick = () => { loadDay = b.dataset.day; $('#lt-file').click(); }; });
   if ($('#lt-file')) $('#lt-file').onchange = async (e) => {
-    const f = e.target.files[0];
+    const files = [...e.target.files];
     e.target.value = '';
-    if (!f) return;
+    if (!files.length) return;
     toast('Reading the PDF…');
-    if (await addLetterPdf(f, loadDay)) renderLetters();
+    let ok = 0;
+    for (const f of files) if (await addLetterPdf(f, files.length === 1 ? loadDay : '')) ok++;
+    if (ok) renderLetters();
   };
+  const needPdf = () => toast(missing.some((d) => d.startsWith('list:'))
+    ? 'Load Door knock letters.pdf first: tap Load PDF and pick it from OneDrive › Door Knock list.'
+    : 'Load the letters PDF for that day first (Load PDF on this tab).', null, 8000);
   const busy = async (btn, rowsToPrint, filename) => {
     const label = btn.textContent;
     btn.disabled = true;
@@ -259,9 +284,9 @@ async function renderLetters() {
       btn.textContent = label;
     }
   };
-  if ($('#lt-all')) $('#lt-all').onclick = (e) => busy(e.currentTarget, ready, `Letters - ${list.built || localDate()} (${ready.length}).pdf`);
+  if ($('#lt-all')) $('#lt-all').onclick = (e) => (!ready.length ? needPdf() : busy(e.currentTarget, ready, `Letters - ${list.built || localDate()} (${ready.length}).pdf`));
   app.querySelectorAll('.lt-one').forEach((b) => {
-    b.onclick = () => { const r = rows[+b.dataset.i]; busy(b, [r], `Letter - ${safeName(r.line)}.pdf`); };
+    b.onclick = () => { const r = rows[+b.dataset.i]; if (!(r.key && idx[r.key] && r.page)) return needPdf(); busy(b, [r], `Letter - ${safeName(r.line)}.pdf`); };
   });
 }
 

@@ -549,8 +549,8 @@ async function renderSetup() {
     <textarea id="addr" spellcheck="false" placeholder="12 High Street, Rayleigh SS6 7AB&#10;4 Rectory Road, Hockley SS5 4AA">${esc(draft.text || '')}</textarea>
     <div class="hint" id="addr-count"></div>
     <div class="stack">
-      <button class="btn" id="import" type="button">Import CSV run list</button>
-      <input type="file" id="file" accept=".csv,text/csv,text/plain" hidden>
+      <button class="btn" id="import" type="button">Import CSV run list (+ letters PDF)</button>
+      <input type="file" id="file" accept=".csv,text/csv,text/plain,.pdf,application/pdf" multiple hidden>
     </div>
     <label for="start">Start point</label>
     <input type="text" id="start" value="${esc(draft.start || S.settings.start)}" autocomplete="off">
@@ -583,14 +583,20 @@ async function renderSetup() {
   if ($('#resume')) $('#resume').onclick = () => go(active.status === 'active' ? 'door' : 'review');
   if ($('#to-settings')) $('#to-settings').onclick = () => go('settings');
   $('#import').onclick = () => $('#file').click();
+  // Tick "Door knock list.csv" AND "Door knock letters.pdf" (same OneDrive folder): the list goes in here, the letters
+  // to the Letters tab (Hal 26 Nov 2026: one step). The list goes first so the PDF can be matched to it.
   $('#file').onchange = async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const text = await f.text();
+    const files = [...e.target.files];
     e.target.value = '';
-    if (await takeOverflowCsv(text)) return;
-    const lines = csvToLines(text);
-    addLinesToDraft(lines, `Imported ${lines.length} address${lines.length === 1 ? '' : 'es'} from ${f.name}`);
+    if (!files.length) return;
+    const isPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+    for (const f of files.filter((x) => !isPdf(x))) {
+      const text = await f.text();
+      if (await takeOverflowCsv(text)) continue;
+      const lines = csvToLines(text);
+      await addLinesToDraft(lines, `Imported ${lines.length} address${lines.length === 1 ? '' : 'es'} from ${f.name}`);
+    }
+    for (const f of files.filter(isPdf)) await addLetterPdf(f, '');
   };
   $('#clear').onclick = () => {
     if (!ta.value.trim()) return;
@@ -1694,14 +1700,12 @@ async function takeShare() {
   // Letters PDFs (OneDrive › Door Knock letters) go to the Letters tab; anything else shared with them carries on below.
   const pdfs = (sh.files || []).filter((f) => f.blob);
   sh.files = (sh.files || []).filter((f) => !f.blob);
-  if (pdfs.length) {
+  if (pdfs.length && !sh.files.length && !(sh.text || '').trim()) {
     await takeSharedPdfs(pdfs);
-    if (!sh.files.length && !(sh.text || '').trim()) {
-      S.view = 'letters';
-      history.replaceState({ view: 'letters' }, '');
-      render();
-      return true;
-    }
+    S.view = 'letters';
+    history.replaceState({ view: 'letters' }, '');
+    render();
+    return true;
   }
   // An area pack for the Market appraisal tab comes in the same way as a door list.
   const pack = (sh.files || []).find((f) => looksLikePack(f.text));
@@ -1732,6 +1736,7 @@ async function takeShare() {
   S.view = 'setup';
   history.replaceState({ view: 'setup' }, '');
   await addLinesToDraft(lines, `Added ${lines.length} address${lines.length === 1 ? '' : 'es'} from share`);
+  if (pdfs.length) await takeSharedPdfs(pdfs);   // after the list, so the letters PDF is matched to it
   return true;
 }
 
