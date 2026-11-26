@@ -105,8 +105,10 @@ async function addLetterPdf(file, forDay) {
   let title = '';
   try { title = doc.getTitle() || ''; } catch (e) { /* untitled */ }
   const forList = LIST_PDF.exec(title);
-  let day = forDay;
-  if (!day && forList) {
+  // A "Door knock letters <date>" PDF always goes with its own list, whichever button picked it (Hal 26 Nov 2026 tapped
+  // Replace on Thursday's box and picked Friday's file: it was saved as Thursday's and pages would have printed wrong).
+  let day = forList ? '' : forDay;
+  if (forList) {
     day = 'list:' + forList[1];
     if (forList[1] !== list.built) {
       toast(`That letters PDF is for ${prettyDate(forList[1])}, but your list is for ${prettyDate(list.built) || 'another day'}. Import today's Door knock list.csv and Door knock letters.pdf together.`, null, 12000);
@@ -120,12 +122,17 @@ async function addLetterPdf(file, forDay) {
     return null;
   }
   const want = (list.rows.find((r) => (r.key || r.day) === day) || {}).pages;
+  // Wrong page count = wrong letters would print, so don't keep it.
+  if (want && want !== pages) {
+    toast(`Not saved: ${file.name || 'that PDF'} has ${pages} pages but the list needs ${want}, so the wrong letters would print. On the Door Knock tab tap Import and tick today's Door knock list.csv and Door knock letters.pdf together.`, null, 14000);
+    return null;
+  }
   const blob = new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
   await DB.put('kv', blob, 'letterPdf:' + day);
   const idx = await pdfIndex();
   idx[day] = { name: file.name || 'letters.pdf', pages, added: Date.now() };
   await DB.put('kv', idx, 'letterPdfs');
-  const warn = want && want !== pages ? ` WARNING: it has ${pages} pages but the list expects ${want}, so pages may not line up. Check you picked the letters file (not the slips).` : '';
+  const warn = '';
   toast(`${day.startsWith('list:') ? `All ${pages} letters for ${prettyDate(day.slice(5))}` : `Letters PDF for ${prettyDate(day)}`} saved on the phone: print or share them on the Letters tab.${warn}`, null, warn ? 12000 : 5000);
   return day;
 }
