@@ -25,7 +25,7 @@ function lettersFromCsv(hdr, data, lineOf) {
     const g = (k) => (at(k) >= 0 ? (r[at(k)] || '').trim() : '');
     rows.push({
       stop: +g('stop') || i + 1, line, letter: g('letter'), why: g('letter_why'),
-      day: g('letter_day'), page: +g('letter_page') || 0, pages: +g('letter_pages') || 0, file: g('letter_file')
+      day: g('letter_day'), page: +(g('letter_pdf_page') || g('letter_page')) || 0, pages: +(g('letter_pdf_pages') || g('letter_pages')) || 0, file: g('letter_file')
     });
   });
   if (!rows.some((x) => x.letter)) return null;
