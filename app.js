@@ -516,7 +516,7 @@ $('#tb-value').onclick = () => go('value');
 $('#tb-runs').onclick = () => go('history');
 $('#tb-settings').onclick = () => go('settings');
 
-const TAB_OF = { letters: 'tb-letters', value: 'tb-value', fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
+const TAB_OF = { letters: 'tb-letters', slips: 'tb-letters', value: 'tb-value', fees: 'tb-fees', history: 'tb-runs', xmas: 'tb-runs', settings: 'tb-settings' };
 function showTabs() {
   const on = TAB_OF[S.view] || 'tb-home';
   for (const id of ['tb-home', 'tb-letters', 'tb-value', 'tb-fees', 'tb-runs', 'tb-settings']) {
@@ -530,7 +530,7 @@ function render() {
   showTabs();
   if (S.view === 'door') startGps(); else stopGps();
   setStatus(S.run && S.run.status === 'active' ? `Run in progress · ${loggedCount(S.run)}/${S.run.stops.length}` : '');
-  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, overflow: renderOverflow, letters: renderLetters, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
+  ({ setup: renderSetup, review: renderReview, door: renderDoor, summary: renderSummary, history: renderHistory, xmas: renderXmas, overflow: renderOverflow, letters: renderLetters, slips: renderSlips, settings: renderSettings, fees: renderFees, value: renderValue }[S.view] || renderSetup)();
 }
 
 const loggedCount = (run) => run.stops.filter((s) => s.log.outcome).length;

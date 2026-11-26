@@ -207,11 +207,13 @@ async function renderLetters() {
     <h2>✉️ Letters</h2>
     ${!list ? `<p>No letters yet. Share today's <b>Door knock list.csv</b> (OneDrive › Door Knock list) to Griffin: the letters come with it.</p>`
       : `<p class="meta">${rows.length} letter${rows.length === 1 ? '' : 's'} for ${esc(list.built ? shortDay(list.built) : 'today')}${handed ? ` · ${handed} handed over` : ''}</p>`}
+    ${!rows.length ? '<div class="stack"><button class="btn big lt-slips" type="button">✂️ Slips: edit and print</button></div>' : ''}
     ${old ? `<div class="notice warn">This is ${esc(prettyDate(list.built))}'s list, not today's. Share today's Door knock list.csv to update it.</div>` : ''}
     ${rows.length ? `
       ${missing.length ? `<div class="notice warn">Load the letters PDF${missing.length === 1 ? '' : 's'} below to print from here (or in OneDrive: ⋮ › Share › Griffin on the PDF).</div>${dayBoxes}` : ''}
       <div class="stack">
         <button class="btn pri big" id="lt-all" type="button" ${ready.length ? '' : 'disabled'}>🖨️ Print / share all ${ready.length === rows.length ? rows.length : `${ready.length} of ${rows.length}`} letters</button>
+        <button class="btn big lt-slips" type="button">✂️ Slips: edit and print (${Math.ceil(rows.length / 3)} sheet${Math.ceil(rows.length / 3) === 1 ? '' : 's'})</button>
       </div>
       ${rows.map((r, i) => {
         const t = (r.letter || '?').split(' ')[0];
@@ -232,6 +234,7 @@ async function renderLetters() {
       ${missing.length ? '' : `<details class="lt-pdfs"><summary>Letters PDFs on this phone (${days.length})</summary>${dayBoxes}</details>`}` : ''}
   `;
 
+  app.querySelectorAll('.lt-slips').forEach((b) => { b.onclick = () => go('slips'); });
   let loadDay = '';
   app.querySelectorAll('.lt-load').forEach((b) => { b.onclick = () => { loadDay = b.dataset.day; $('#lt-file').click(); }; });
   if ($('#lt-file')) $('#lt-file').onchange = async (e) => {
